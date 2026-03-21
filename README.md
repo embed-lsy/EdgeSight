@@ -1,39 +1,140 @@
-# AuraDesk
+```markdown
+# EdgeSight
 
-#### 介绍
-{**以下是 Gitee 平台说明，您可以替换此简介**
-Gitee 是 OSCHINA 推出的基于 Git 的代码托管平台（同时支持 SVN）。专为开发者提供稳定、高效、安全的云端软件开发协作平台
-无论是个人、团队、或是企业，都能够用 Gitee 实现代码托管、项目管理、协作开发。企业项目请看 [https://gitee.com/enterprises](https://gitee.com/enterprises)}
-
-#### 软件架构
-软件架构说明
+一个跨平台的实时目标检测监控与分析系统，支持 Windows 与树莓派 Linux 双平台，集成 YOLOv5/v8 模型推理，提供可视化监控界面、深度数据分析及灵活的参数配置功能。
 
 
-#### 安装教程
+## 功能特性
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+### 监控界面
+- 实时显示原始图像与 AI 处理后的图像
+- 叠加显示检测框坐标（x, y）、置信度、目标类别
+- 支持实时微调置信度阈值与 NMS 阈值
+- 实时展示推理 FPS 与画面 FPS
 
-#### 使用说明
+### 深度分析界面
+- 实时绘制检测框 x, y 坐标变化曲线并提供异常提示
+- 同步展示检测框宽度/高度与目标距离的关联曲线
+- 实时监控检测框置信度及其阈值变化趋势
+- 绘制推理 FPS 波动曲线
+- 可视化展示 CPU 与内存占用进度条
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+### 设置界面
+- 灵活选择模型文件（支持 YOLOv5/v8 及其 INT8 量化模型）
+  - Windows：仅支持 ONNX 格式
+  - 树莓派 Linux：支持 ONNX 与 NCNN 格式
+- 可选硬件加速器（CPU/GPU/NPU，依平台支持情况而定）
+- 自定义目标选择规则（最高置信度/最接近中心/指定类别）
+- 支持设置基准宽度、采样频率
+- 一键标定功能并实时显示标定状态
+- 可自由开启/关闭深度分析模块
 
-#### 参与贡献
 
-1.  Fork 本仓库
-2.  新建 Feat_xxx 分支
-3.  提交代码
-4.  新建 Pull Request
+## 支持平台与模型
+
+| 平台          | 支持模型格式   | 推荐推理引擎 |
+|---------------|----------------|--------------|
+| Windows       | ONNX           | OpenCV DNN / ONNX Runtime |
+| 树莓派 Linux  | ONNX, NCNN     | NCNN (优先) / ONNX Runtime |
 
 
-#### 特技
+## 性能对比
 
-1.  使用 Readme\_XXX.md 来支持不同的语言，例如 Readme\_en.md, Readme\_zh.md
-2.  Gitee 官方博客 [blog.gitee.com](https://blog.gitee.com)
-3.  你可以 [https://gitee.com/explore](https://gitee.com/explore) 这个地址来了解 Gitee 上的优秀开源项目
-4.  [GVP](https://gitee.com/gvp) 全称是 Gitee 最有价值开源项目，是综合评定出的优秀开源项目
-5.  Gitee 官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
-6.  Gitee 封面人物是一档用来展示 Gitee 会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+以下为核心优化阶段的测试数据（基于 YOLOv8 模型）：
+
+| 阶段          | 平台          | 模型       | 推理引擎    | FPS  | 优化说明                     |
+|---------------|---------------|------------|-------------|------|------------------------------|
+| 初始版本      | Windows PC    | YOLOv8     | ONNX Runtime | 10.0   | 基线版本                     |
+| 量化优化      | Windows PC    | YOLOv8 INT8| OpenCV DNN  | 14.5  | 推理速度提升约 4 倍          |
+| 引擎切换      | 树莓派 4B     | YOLOv8 INT8| NCNN        | 2.35 | 较 ONNX Runtime 提升约 3 倍  |
+| 最终方案      | 树莓派 4B     | YOLOv5 INT8| NCNN        | 4.5 | 检测框/置信度正常，CPU 占用极低 |
+
+
+## 安装与部署
+
+### 环境依赖
+- Python 3.8+
+- PyQt6
+- OpenCV
+- ONNX Runtime (可选，用于 Windows/树莓派 ONNX 推理)
+- NCNN (仅树莓派需要，用于 NCNN 模型推理)
+
+### Windows 安装
+```bash
+# 克隆仓库
+git clone https://github.com/fdagtfedshe/EdgeSight.git
+cd EdgeSight
+
+# 安装依赖
+pip install PyQt6 opencv-python onnxruntime
+
+# 运行程序
+python main_windows.py
+```
+
+### 树莓派 Linux 安装
+```bash
+# 克隆仓库
+git clone https://github.com/fdagtfedshe/EdgeSight.git
+cd EdgeSight
+
+# 安装基础依赖
+pip install PyQt6 opencv-python
+
+# 安装 ONNX Runtime (可选)
+# 参考官方文档安装树莓派对应版本
+
+# 安装 NCNN (可选，推荐)
+# 参考 NCNN 官方文档编译安装树莓派版本
+
+# 运行程序
+python main_raspberry.py
+python main_windows.py
+```
+
+
+## 使用说明
+
+1. **选择模型与标签**：在“设置”界面选择对应的模型文件（.onnx/.param）与标签文件（.txt）。
+2. **配置硬件与规则**：选择硬件加速器、目标选择规则，设置基准宽度等参数。
+3. **一键标定**：点击“一键标定”完成相机标定（用于距离估算）。
+4. **实时监控**：在“监控”界面查看检测结果，微调阈值以优化效果。
+5. **深度分析**：在“深度分析”界面查看各指标曲线，监控系统运行状态。
+
+
+## 项目结构
+
+```
+EdgeSight/
+├── core/                  # 核心功能模块
+│   ├── camera.py          # 相机驱动与图像采集
+│   ├── config.py          # 配置管理
+│   └── detector.py        # 目标检测推理封装
+├── model/                 # 模型文件存放目录
+├── test/                  # 测试程序与脚本
+├── ui/                    # PyQt6 UI 界面代码
+├── main_raspberry.py      # 树莓派 Linux 入口程序
+├── main_windows.py        # Windows 入口程序
+└── README.md
+```
+
+
+## 研发历程
+
+1. **初始阶段**：基于 ONNX Runtime 部署 YOLOv8 模型，在 PC 和树莓派上运行，发现树莓派性能不理想。
+2. **量化尝试**：切换至 OpenCV DNN 并将模型量化为 INT8，PC 端速度提升约 4 倍，但树莓派无明显改善。
+3. **模型对比**：尝试 YOLOv5 及其 INT8 模型，效果均不如 YOLOv8，决定继续基于 YOLOv8 优化。
+4. **参数调优**：在树莓派上测试 YOLOv8 INT8，通过降低帧率、优化 ONNX 线程等方式摸清最佳参数，但性能提升有限。
+5. **引擎切换**：转向 NCNN 引擎，在树莓派上测试 YOLOv8 NCNN 模型，解决虚假 FPS 问题后，真实 FPS 达 2.35（约 3 倍提升），但部署后出现检测框异常、置信度恒为 1 的问题。
+6. **问题排查**：推测与 softmax 层有关，尝试后处理移除 softmax 未解决，最终切换至 YOLOv5 NCNN 方案，纯脚本测试 FPS 达 59.52，部署至伺服系统后 FPS 稳定在 1.8-2.0，检测框与置信度正常，CPU 占用极低。
+
+
+## 贡献
+
+欢迎提交 Issue 或 Pull Request 来改进 EdgeSight！
+
+
+## 许可证
+
+[MIT License](LICENSE)
+```
