@@ -1,4 +1,4 @@
-```markdown
+
 # EdgeSight
 
 一个跨平台的实时目标检测监控与分析系统，支持 Windows 与树莓派 Linux 双平台，集成 YOLOv5/v8 模型推理，提供可视化监控界面、深度数据分析及灵活的参数配置功能。
@@ -137,4 +137,3 @@ EdgeSight/
 ## 许可证
 
 [MIT License](LICENSE)
-```
