@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 ################################################################################
-## Form generated from reading UI file 'VisServoControl.ui'
+## Form generated from reading UI file 'EdgeSightMain.ui'
 ##
 ## Created by: Qt User Interface Compiler version 6.10.1
 ##
@@ -15,10 +15,11 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame,
-    QGroupBox, QHBoxLayout, QLCDNumber, QLabel,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy,
-    QSlider, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
+    QFrame, QGroupBox, QHBoxLayout, QLCDNumber,
+    QLabel, QProgressBar, QPushButton, QScrollArea,
+    QSizePolicy, QSlider, QSpinBox, QTabWidget,
+    QVBoxLayout, QWidget)
 
 from pyqtgraph import PlotWidget
 
@@ -808,13 +809,11 @@ class Ui_Form(object):
 
         self.label_30 = QLabel(self.groupBox_14)
         self.label_30.setObjectName(u"label_30")
-        self.label_30.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.horizontalLayout_11.addWidget(self.label_30)
 
         self.label__calibrate_status = QLabel(self.groupBox_14)
         self.label__calibrate_status.setObjectName(u"label__calibrate_status")
-        self.label__calibrate_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.horizontalLayout_11.addWidget(self.label__calibrate_status)
 
@@ -823,6 +822,109 @@ class Ui_Form(object):
 
 
         self.verticalLayout_25.addWidget(self.groupBox_14)
+
+        self.groupBox_calib = QGroupBox(self.scrollAreaWidgetContents)
+        self.groupBox_calib.setObjectName(u"groupBox_calib")
+        self.verticalLayout_calib = QVBoxLayout(self.groupBox_calib)
+        self.verticalLayout_calib.setObjectName(u"verticalLayout_calib")
+        self.horizontalLayout_31 = QHBoxLayout()
+        self.horizontalLayout_31.setObjectName(u"horizontalLayout_31")
+        self.label_31 = QLabel(self.groupBox_calib)
+        self.label_31.setObjectName(u"label_31")
+        self.label_31.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_31.addWidget(self.label_31)
+
+        self.spin_pattern_cols = QSpinBox(self.groupBox_calib)
+        self.spin_pattern_cols.setObjectName(u"spin_pattern_cols")
+        self.spin_pattern_cols.setMinimum(3)
+        self.spin_pattern_cols.setMaximum(20)
+        self.spin_pattern_cols.setValue(9)
+
+        self.horizontalLayout_31.addWidget(self.spin_pattern_cols)
+
+        self.label_39 = QLabel(self.groupBox_calib)
+        self.label_39.setObjectName(u"label_39")
+        self.label_39.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.horizontalLayout_31.addWidget(self.label_39)
+
+        self.spin_pattern_rows = QSpinBox(self.groupBox_calib)
+        self.spin_pattern_rows.setObjectName(u"spin_pattern_rows")
+        self.spin_pattern_rows.setMinimum(3)
+        self.spin_pattern_rows.setMaximum(20)
+        self.spin_pattern_rows.setValue(6)
+
+        self.horizontalLayout_31.addWidget(self.spin_pattern_rows)
+
+
+        self.verticalLayout_calib.addLayout(self.horizontalLayout_31)
+
+        self.horizontalLayout_32 = QHBoxLayout()
+        self.horizontalLayout_32.setObjectName(u"horizontalLayout_32")
+        self.label_40 = QLabel(self.groupBox_calib)
+        self.label_40.setObjectName(u"label_40")
+        self.label_40.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_32.addWidget(self.label_40)
+
+        self.spin_square_mm = QDoubleSpinBox(self.groupBox_calib)
+        self.spin_square_mm.setObjectName(u"spin_square_mm")
+        self.spin_square_mm.setDecimals(1)
+        self.spin_square_mm.setMinimum(1.000000000000000)
+        self.spin_square_mm.setMaximum(500.000000000000000)
+        self.spin_square_mm.setValue(25.000000000000000)
+
+        self.horizontalLayout_32.addWidget(self.spin_square_mm)
+
+
+        self.verticalLayout_calib.addLayout(self.horizontalLayout_32)
+
+        self.horizontalLayout_33 = QHBoxLayout()
+        self.horizontalLayout_33.setObjectName(u"horizontalLayout_33")
+        self.label_41 = QLabel(self.groupBox_calib)
+        self.label_41.setObjectName(u"label_41")
+        self.label_41.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_33.addWidget(self.label_41)
+
+        self.spin_pitch_deg = QDoubleSpinBox(self.groupBox_calib)
+        self.spin_pitch_deg.setObjectName(u"spin_pitch_deg")
+        self.spin_pitch_deg.setDecimals(1)
+        self.spin_pitch_deg.setMinimum(0.000000000000000)
+        self.spin_pitch_deg.setMaximum(60.000000000000000)
+        self.spin_pitch_deg.setValue(0.000000000000000)
+
+        self.horizontalLayout_33.addWidget(self.spin_pitch_deg)
+
+
+        self.verticalLayout_calib.addLayout(self.horizontalLayout_33)
+
+        self.horizontalLayout_34 = QHBoxLayout()
+        self.horizontalLayout_34.setObjectName(u"horizontalLayout_34")
+        self.btn_calib_capture = QPushButton(self.groupBox_calib)
+        self.btn_calib_capture.setObjectName(u"btn_calib_capture")
+        self.btn_calib_capture.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_34.addWidget(self.btn_calib_capture)
+
+        self.btn_calib_solve = QPushButton(self.groupBox_calib)
+        self.btn_calib_solve.setObjectName(u"btn_calib_solve")
+        self.btn_calib_solve.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_34.addWidget(self.btn_calib_solve)
+
+
+        self.verticalLayout_calib.addLayout(self.horizontalLayout_34)
+
+        self.label_calib_info = QLabel(self.groupBox_calib)
+        self.label_calib_info.setObjectName(u"label_calib_info")
+        self.label_calib_info.setWordWrap(True)
+
+        self.verticalLayout_calib.addWidget(self.label_calib_info)
+
+
+        self.verticalLayout_25.addWidget(self.groupBox_calib)
 
         self.scrollArea.setWidget(self.scrollAreaWidgetContents)
 
@@ -901,9 +1003,17 @@ class Ui_Form(object):
         self.label_28.setText(QCoreApplication.translate("Form", u"\u91c7\u6837\u9891\u7387\uff08Hz\uff09\uff1a", None))
         self.label_sample_freq.setText(QCoreApplication.translate("Form", u"30Hz", None))
         self.checkBox.setText(QCoreApplication.translate("Form", u"\u662f\u5426\u542f\u7528\u6df1\u5ea6\u5206\u6790", None))
-        self.QPuahButton_calibrate_status.setText(QCoreApplication.translate("Form", u"\u4e00\u952e\u6807\u5b9a", None))
+        self.QPuahButton_calibrate_status.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u91c7\u96c6", None))
         self.label_30.setText(QCoreApplication.translate("Form", u"\u6807\u5b9a\u72b6\u6001\uff1a", None))
         self.label__calibrate_status.setText(QCoreApplication.translate("Form", u"\u672a\u6807\u5b9a", None))
+        self.groupBox_calib.setTitle(QCoreApplication.translate("Form", u"\u76f8\u673a\u6807\u5b9a", None))
+        self.label_31.setText(QCoreApplication.translate("Form", u"\u68cb\u76d8\u683c\u5185\u89d2\u70b9\uff1a", None))
+        self.label_39.setText(QCoreApplication.translate("Form", u"\u00d7", None))
+        self.label_40.setText(QCoreApplication.translate("Form", u"\u65b9\u683c\u8fb9\u957f\uff08mm\uff09\uff1a", None))
+        self.label_41.setText(QCoreApplication.translate("Form", u"\u76f8\u673a\u4fef\u4ef0\u89d2\uff08\u00b0\uff09\uff1a", None))
+        self.btn_calib_capture.setText(QCoreApplication.translate("Form", u"\u91c7\u96c6\u4e00\u5e27", None))
+        self.btn_calib_solve.setText(QCoreApplication.translate("Form", u"\u6c42\u89e3\u5e76\u4fdd\u5b58", None))
+        self.label_calib_info.setText(QCoreApplication.translate("Form", u"\u672a\u91c7\u96c6\u3002\u8bf7\u8ba9\u68cb\u76d8\u683c\u5728\u753b\u9762\u4e2d\u53d8\u6362\u4f4d\u7f6e\u4e0e\u503e\u659c\u89d2\uff0c\u81f3\u5c11\u91c7\u96c6 10 \u5e27\u3002", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_setting), QCoreApplication.translate("Form", u"\u8bbe\u7f6e", None))
     # retranslateUi
 

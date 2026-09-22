@@ -27,5 +27,8 @@ recordings/
 *.avi
 !test/**/*.mp4
 
+# 标定产物（设备相关，换相机需重标，不入库）
+models/calib.json
+
 # 本地工作文件（笔记、缓存、脚本草稿不进仓库）
 .workbuddy/

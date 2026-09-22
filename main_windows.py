@@ -1,10 +1,12 @@
 from PySide6.QtWidgets import QApplication,QPushButton,QBoxLayout,QWidget,QGroupBox,QLabel,QMessageBox,QFileDialog,QStatusBar
 from PySide6.QtCore import Qt,Slot,QTimer,QThread,Signal,QObject
 from PySide6.QtGui import QIcon,QPixmap,QImage
-from ui.Ui_VisServoControl import Ui_Form
+from ui.Ui_EdgeSightMain import Ui_Form
 from core.config.windows_global_params import GlobalParams
 from core.camera.opencv_camera import CameraInitThread
 from core.detector import ModelInitThread, YOLODetector
+from core.calibration import (CameraCalibrator, CameraIntrinsics,
+                              GeometricRanger, RangingConfig)
 from typing import Optional
 from collections import deque
 import sys
@@ -20,7 +22,7 @@ class MainWindow(QWidget, Ui_Form):
     def __init__(self):
         super(MainWindow, self).__init__()
         self.setupUi(self)
-        self.setWindowTitle('AI边缘视角伺服控制系统')
+        self.setWindowTitle('EdgeSight — 单目视觉感知栈')
         # 初始化核心组件
         self.camera_index = 0
         self.cap = None
@@ -31,6 +33,11 @@ class MainWindow(QWidget, Ui_Form):
         self.inference_interval = 3  # 每5帧推理一次（0,1,2,3,4,5...）
         self.last_detection=None
         self.is_loading_model=False
+        # 标定状态：不采集时 calibrator 为 None，避免误采集普通帧
+        self.calibrator = None
+        # 几何测距器。先无内参构造，load_calibration() 后注入
+        self.ranger = GeometricRanger(CameraIntrinsics(),
+                                      RangingConfig.from_params(self.global_params))
         # 初始化存储图表的环形缓冲区
         self.history_len = 100
         self.sensor_history_x = deque(maxlen=self.history_len)
@@ -123,6 +130,9 @@ class MainWindow(QWidget, Ui_Form):
         self.lcd_credibility.display(self.global_params.credibility)
         self.label_target_category.setText(self.global_params.target_category)
         self.update_specific_class_combo()
+        #相机标定：把已保存的内参加载进来，并刷新 UI 显示
+        self.load_calibration()
+        self.refresh_calib_widgets()
     
     #摄像头线程启动
     def async_init_camera(self):
@@ -275,6 +285,8 @@ class MainWindow(QWidget, Ui_Form):
         self.QPuahButton_calibrate_status.clicked.connect(self.on_calibrate_clicked)
         self.btn_model_browse.clicked.connect(self.on_model_browse)
         self.btn_label_browse.clicked.connect(self.on_label_browse)
+        self.btn_calib_capture.clicked.connect(self.on_calib_capture_clicked)
+        self.btn_calib_solve.clicked.connect(self.on_calib_solve_clicked)
         self.tabWidget.currentChanged.connect(self.on_tab_change)
 
     def bind_model_thres_widgets_realtime(self):#更新标签与值
@@ -284,9 +296,131 @@ class MainWindow(QWidget, Ui_Form):
     def bind_calibration_widgets(self):#仅标定时生效
         self.slider_sample_freq.valueChanged.connect(lambda v:self.label_sample_freq.setText(f'{v}Hz'))
         self.slider_base_width.valueChanged.connect(lambda v:self.label_base_width.setText(f'{v}px'))
+        self.spin_pitch_deg.valueChanged.connect(self.on_pitch_changed)
        
     def bind_other(self):
         self.tabWidget.currentChanged.connect(self.on_tab_change)
+
+    # ------------------------------------------------------------------
+    # 相机标定（CHARTER「范围内的」第 1 条）
+    # ------------------------------------------------------------------
+    def load_calibration(self):
+        """从磁盘加载内参，并注入测距器。
+
+        没有标定文件不是错误 —— 只是测距不可用。所以这里只记录原因，
+        不阻塞启动。UI 上会明确显示"未标定"，而不是静默给一个假距离。
+        """
+        path = self.global_params.calib_path
+        if not os.path.isabs(path):
+            # 相对仓库根解析，避免工作目录变化导致找不到
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
+        self._calib_file = path
+
+        intr = CameraCalibrator.load(path)
+        if intr is None:
+            self.global_params.intrinsics = None
+            self.global_params.calibrated = False
+            self.global_params.invalid_reason = '未找到标定文件'
+            return
+
+        self.global_params.intrinsics = intr
+        self.global_params.calibrated = intr.is_valid()
+        if intr.is_valid():
+            self.global_params.invalid_reason = ''
+            self.ranger.update_intrinsics(intr)
+            self.status_bar.showMessage(
+                f'已加载相机内参 fx={intr.fx:.1f} fy={intr.fy:.1f} '
+                f'重投影误差={intr.rms_error:.3f}px', 5000)
+            print(f'[标定] 加载 {path}  fx={intr.fx:.2f} fy={intr.fy:.2f} '
+                  f'rms={intr.rms_error:.4f} size={intr.image_size}')
+        else:
+            self.global_params.invalid_reason = '标定文件内容无效'
+
+    def refresh_calib_widgets(self):
+        """把标定状态同步到设置页。"""
+        if self.global_params.calibrated:
+            intr = self.global_params.intrinsics
+            self.label__calibrate_status.setText('已标定')
+            self.label_calib_info.setText(
+                f'fx={intr.fx:.1f}  fy={intr.fy:.1f}  '
+                f'cx={intr.cx:.1f}  cy={intr.cy:.1f}\n'
+                f'重投影误差 {intr.rms_error:.3f} px '
+                f'（<0.5 优 / <1.0 可接受）'
+            )
+        else:
+            self.label__calibrate_status.setText('未标定')
+            reason = self.global_params.invalid_reason or '未标定'
+            self.label_calib_info.setText(
+                f'{reason}。测距不可用（不会给出猜测值）。\n'
+                f'请让棋盘格在画面中变换位置与倾斜角，至少采集 10 帧后求解。'
+            )
+
+    def _make_calibrator(self):
+        cols = self.spin_pattern_cols.value()
+        rows = self.spin_pattern_rows.value()
+        square_m = self.spin_square_mm.value() / 1000.0
+        return CameraCalibrator(pattern_size=(cols, rows), square_size=square_m)
+
+    @Slot()
+    def on_calib_capture_clicked(self):
+        """开始/停止采集。只在采集状态下接帧，避免误采普通画面。"""
+        if self.cap is None or not self.cap.isOpened():
+            QMessageBox.warning(self, '标定错误', '摄像头未连接，无法进行标定！')
+            return
+
+        if self.calibrator is None:
+            self.calibrator = self._make_calibrator()
+            self.btn_calib_capture.setText('停止采集')
+            self.btn_calib_solve.setEnabled(True)
+            self.label_calib_info.setText(
+                '采集中：请让棋盘格在画面中变换位置与倾斜角（已采集 0 帧）')
+        else:
+            self.calibrator = None
+            self.btn_calib_capture.setText('采集一帧')
+            self.label_calib_info.setText('已停止采集。')
+
+    @Slot()
+    def on_calib_solve_clicked(self):
+        """求解内参并持久化。"""
+        if self.calibrator is None or self.calibrator.frame_count == 0:
+            QMessageBox.warning(self, '标定错误', '还没有采集到有效帧。')
+            return
+
+        self.btn_calib_solve.setEnabled(False)
+        QApplication.processEvents()
+        try:
+            intr = self.calibrator.calibrate()
+            CameraCalibrator.save(intr, self._calib_file)
+        except Exception as e:
+            self.label_calib_info.setText(f'求解失败：{e}')
+            QMessageBox.critical(self, '标定失败', f'求解内参出错：{e}')
+            self.btn_calib_solve.setEnabled(True)
+            return
+
+        # 求解成功后立即生效，不必重启
+        self.global_params.intrinsics = intr
+        self.global_params.calibrated = intr.is_valid()
+        self.global_params.invalid_reason = ''
+        self.ranger.update_intrinsics(intr)
+        self.calibrator = None
+        self.btn_calib_capture.setText('采集一帧')
+        self.refresh_calib_widgets()
+
+        quality = ('优' if intr.rms_error < 0.5
+                   else '可接受' if intr.rms_error < 1.0 else '偏低，建议重采')
+        QMessageBox.information(
+            self, '标定完成',
+            f'内参已保存到：\n{self._calib_file}\n\n'
+            f'fx={intr.fx:.1f}  fy={intr.fy:.1f}\n'
+            f'cx={intr.cx:.1f}  cy={intr.cy:.1f}\n'
+            f'重投影误差={intr.rms_error:.3f}px（{quality}）'
+        )
+
+    @Slot()
+    def on_pitch_changed(self, value):
+        """俯仰角改了立即重建测距配置 —— 不需要重标定。"""
+        self.global_params.pitch_deg = float(value)
+        self.ranger.update_config(RangingConfig.from_params(self.global_params))
 
     def update_param_realtime(self,param_name,value,label,fmt):
         setattr(self.global_params,param_name,value)
@@ -304,17 +438,20 @@ class MainWindow(QWidget, Ui_Form):
             if not self.analysis_timer.isActive():
                 self.analysis_timer.start()
         elif currebt_tab=='设置':
-            self.label__calibrate_status.setText('未标定')
+            self.refresh_calib_widgets()
         elif self.analysis_timer.isActive() and currebt_tab!='深度分析' and self.global_params.plot_enable:
             self.analysis_timer.stop()     
                 
     @Slot()
     def on_calibrate_clicked(self):
-        if not self.cap or not self.cap.isOpened():
-            QMessageBox.warning(self, "标定错误", "摄像头未连接，无法进行标定！")
-            return
-        
-        self.label__calibrate_status.setText("标定中……")
+        """应用设置页的参数并重载模型。
+
+        注意：这里**不做相机标定**。相机内参由「相机标定」分组的
+        「求解并保存」负责，因为那是需要棋盘格的独立流程。
+        本按钮只负责把界面上改过的运行参数落到 GlobalParams 并生效，
+        避免"标定"一词同时指两件事（旧版本的问题）。
+        """
+        self.label__calibrate_status.setText("参数应用中……")
         self.QPuahButton_calibrate_status.setEnabled(False)
         QApplication.processEvents()
 
@@ -337,18 +474,18 @@ class MainWindow(QWidget, Ui_Form):
             else:
                 self.global_params.specific_class_id=-1
                 self.global_params.specific_class='无标签'
+            # 测距配置跟着一起刷新（俯仰角可能也改过）
+            self.ranger.update_config(RangingConfig.from_params(self.global_params))
             QTimer.singleShot(2000,self.finish_calibration)
         except Exception as e:
-            self.global_params.calibrated=False
-            self.label__calibrate_status.setText('未标定')
-            QMessageBox.critical(self,'标定失败',f'标定过程出错：{str(e)}')
+            self.label__calibrate_status.setText('参数应用失败')
+            QMessageBox.critical(self,'参数应用失败',f'过程出错：{str(e)}')
             self.QPuahButton_calibrate_status.setEnabled(True)
     
     def finish_calibration(self):#不阻塞主线程
-        self.global_params.calibrated = True
-        self.label__calibrate_status.setText('已标定')
-        QMessageBox.information(self,'标定完成','所有参数已更新并生效')
         self.QPuahButton_calibrate_status.setEnabled(True)
+        QMessageBox.information(self,'参数已应用','运行参数已更新并生效')
+        self.refresh_calib_widgets()   # 标定状态回到真实值，而不是被这里改写
 
     @Slot()        
     def on_model_browse(self):
@@ -425,10 +562,15 @@ class MainWindow(QWidget, Ui_Form):
             self.lcd_credibility.display(0)
         
         if self.global_params.plot_enable:
-            if self.global_params.base_width is not None and self.global_params.detection_width > 0:
-                distance=self.global_params.base_width / self.global_params.detection_width 
-            else:
-                distance=0.0
+            # 真标定 + 几何测距：无内参时返回 None，绘图落 0，但绝不假装有距离
+            dist = None
+            if self.global_params.detection_height > 0:
+                dist = self.ranger.distance_from_box(
+                    target if isinstance(target, dict) else {},
+                    self.global_params.target_category,
+                )
+            self.global_params.distance = dist
+            distance = dist if dist is not None else 0.0
             self.sensor_history_x.append(self.global_params.detection_x)
             self.sensor_history_y.append(self.global_params.detection_y)
             self.sensor_history_wide.append(self.global_params.detection_width)
@@ -440,6 +582,30 @@ class MainWindow(QWidget, Ui_Form):
             self.sensor_history_conf_thres.append(self.global_params.confidence_thres)
             self.time_counter += 1.0 / self.global_params.sample_freq
             
+    def _on_calib_frame(self, frame_bgr):
+        """标定采集回调：检测棋盘格角点并给出实时反馈。
+
+        角点检测是 CPU 密集操作，用计数节流（每 10 帧检一次），
+        否则会拖垮摄像头预览帧率、用户反而对不准。
+        """
+        self._calib_tick = getattr(self, '_calib_tick', 0) + 1
+        if self._calib_tick % 10 != 0:
+            return
+        try:
+            ok = self.calibrator.add_frame(frame_bgr)
+        except Exception as e:
+            print(f'[标定] 采集帧出错：{e}')
+            return
+        n = self.calibrator.frame_count
+        if ok:
+            self.label_calib_info.setText(
+                f'已采集 {n} 帧（当前帧检测到棋盘格 ✓）\n'
+                f'建议继续变换姿态，覆盖画面四角与倾斜')
+        else:
+            self.label_calib_info.setText(
+                f'已采集 {n} 帧（当前帧未检测到棋盘格）\n'
+                f'请让棋盘格完整入画、光照均匀、避免反光')
+
     def update_monitor_data(self):
         # 更新坐标
         self.lcd_centroid_x.display(self.global_params.detection_x)
@@ -456,6 +622,9 @@ class MainWindow(QWidget, Ui_Form):
         if not ret:
             return
         try:
+            # 标定采集中：把当前帧喂给标定器，不改动显示逻辑
+            if self.calibrator is not None:
+                self._on_calib_frame(frame)
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             self.current_frame = frame_rgb.copy()
             # 显示原始图像
@@ -513,6 +682,8 @@ class MainWindow(QWidget, Ui_Form):
                 self.frame_signal.emit(frame_rgb.copy())
 
     def closeEvent(self, event):
+        # 停止采集，避免关闭时还持有标定器
+        self.calibrator = None
         # 停止所有定时器
         for timer in [self.update_timer, self.camera_timer, self.analysis_timer]:
             if timer.isActive():
