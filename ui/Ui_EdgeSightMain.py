@@ -1105,7 +1105,7 @@ class Ui_Form(object):
         self.label_28.setText(QCoreApplication.translate("Form", u"\u91c7\u6837\u9891\u7387\uff08Hz\uff09\uff1a", None))
         self.label_sample_freq.setText(QCoreApplication.translate("Form", u"30Hz", None))
         self.checkBox.setText(QCoreApplication.translate("Form", u"\u662f\u5426\u542f\u7528\u6df1\u5ea6\u5206\u6790", None))
-        self.QPuahButton_calibrate_status.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u91c7\u96c6", None))
+        self.QPuahButton_calibrate_status.setText(QCoreApplication.translate("Form", u"\u5e94\u7528\u53c2\u6570", None))
         self.label_30.setText(QCoreApplication.translate("Form", u"\u6807\u5b9a\u72b6\u6001\uff1a", None))
         self.label__calibrate_status.setText(QCoreApplication.translate("Form", u"\u672a\u6807\u5b9a", None))
         self.groupBox_calib.setTitle(QCoreApplication.translate("Form", u"\u76f8\u673a\u6807\u5b9a", None))

@@ -1019,7 +1019,7 @@ QLineEdit, QTextEdit {
                    </size>
                   </property>
                   <property name="text">
-                   <string>开始采集</string>
+                   <string>应用参数</string>
                   </property>
                  </widget>
                 </item>
