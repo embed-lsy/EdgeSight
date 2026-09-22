@@ -71,7 +71,32 @@ EdgeSight 就是补上这一课：在**只有单目 USB 摄像头、没有激光
 
 ## 性能对比
 
-以下为核心优化阶段的测试数据（基于 YOLOv8 模型）：
+> 分两部分：**本期实测**是 2026-09-22 在当前 Windows 机器上用固定脚本测出的数字，条件写明、可复现；
+> **历史记录**来自早期树莓派 NCNN 阶段的开发日志，**未在本期硬件上复现**，保留作为研发历程。
+
+### 本期实测（Windows PC，CPU 推理，2026-09-22）
+
+**测试条件**：ThinkBook 14 G6 / i5-13420H（8 物理核 / 12 逻辑核）/ 16GB RAM /
+Intel UHD 核显（**无独显**）/ ONNX Runtime 1.24.1 / **仅 CPUExecutionProvider** /
+输入 1×3×640×640 / warmup 2 + 计时 5 次取均值。
+
+| 模型 | 精度 | 平均耗时 | FPS | 备注 |
+|---|---|---|---|---|
+| `yolov8n.onnx` | fp32 | 43–47 ms | **21.3–23.1** | 默认线程数，检测主链路主力 |
+| `yolov8n.onnx` | int8 | 66.4 ms | 15.1 | ⚠️ **比 fp32 还慢**，原因未做 profiling，不作断言 |
+| `depth-anything-v2-small.onnx` | fp32 | 593 ms @518×518 | 1.69 | 稠密深度，按设计走异步旁路（8 线程） |
+| `depth-anything-v2-small.onnx` | fp32 | 142 ms @224×224 | 7.04 | 降分辨率可提速，但深度精度会下降 |
+
+**线程数陷阱（实测）**：把 `intra_op_num_threads` 设为 **12**（＝逻辑核数）会让速度腰斩——
+yolov8n 从 21.3 FPS 掉到 **10.4 FPS**，属线程超订；设 4 或 8 都在测量噪声范围内。
+**本机物理核只有 8 个，不要按逻辑核数配线程。**
+
+**两条结论**：
+1. 检测单模型 21 FPS，相对「整链路 ≥8 FPS」门槛留出约 2.6× 余量；
+2. 但**深度模型与检测串行只有约 1.0 FPS**（实测 1023 ms/帧）——这就是 CHARTER 规定
+   稠密深度必须走**异步旁路**、且门槛只约束检测主链路的实测依据。
+
+### 历史记录（早期开发，未在本期硬件复现）
 
 | 阶段          | 平台          | 模型       | 推理引擎    | FPS  | 优化说明                     |
 |---------------|---------------|------------|-------------|------|------------------------------|
@@ -79,6 +104,10 @@ EdgeSight 就是补上这一课：在**只有单目 USB 摄像头、没有激光
 | 量化优化      | Windows PC    | YOLOv8 INT8| OpenCV DNN  | 14.5  | 推理速度提升约 4 倍          |
 | 引擎切换      | 树莓派 4B     | YOLOv8 INT8| NCNN        | 2.35 | 较 ONNX Runtime 提升约 3 倍  |
 | 最终方案      | 树莓派 4B     | YOLOv5 INT8| NCNN        | 4.5 | 检测框/置信度正常，CPU 占用极低 |
+
+> ⚠️ 上表「优化说明」一列是**原始日志原文**，其倍数措辞与表内数字不符
+> （10.0 → 14.5 实为 1.45×；2.35 → 4.5 实为 1.9×）。此处保留原记录不做改写，
+> 但**引用时请以数字为准**，不要引用倍数措辞。
 
 
 ## 对标与边界
@@ -113,19 +142,22 @@ EdgeSight 就是补上这一课：在**只有单目 USB 摄像头、没有激光
 
 ### 环境依赖
 - Python 3.8+
-- PyQt6
-- OpenCV
+- **PySide6**（Qt UI，LGPL 授权；本项目全程使用 PySide6，**不使用 PyQt6**）
+- OpenCV（`opencv-python`）
+- NumPy
+- pyqtgraph（曲线绘制）
+- psutil（CPU / 内存占用监控）
 - ONNX Runtime (可选，用于 Windows/树莓派 ONNX 推理)
 - NCNN (仅树莓派需要，用于 NCNN 模型推理)
 
 ### Windows 安装
 ```bash
 # 克隆仓库
-git clone https://github.com/fdagtfedshe/EdgeSight.git
+git clone https://github.com/embed-lsy/EdgeSight.git
 cd EdgeSight
 
 # 安装依赖
-pip install PyQt6 opencv-python onnxruntime
+pip install PySide6 opencv-python numpy pyqtgraph psutil onnxruntime
 
 # 运行程序
 python main_windows.py
@@ -134,11 +166,11 @@ python main_windows.py
 ### 树莓派 Linux 安装
 ```bash
 # 克隆仓库
-git clone https://github.com/fdagtfedshe/EdgeSight.git
+git clone https://github.com/embed-lsy/EdgeSight.git
 cd EdgeSight
 
 # 安装基础依赖
-pip install PyQt6 opencv-python
+pip install PySide6 opencv-python numpy pyqtgraph psutil
 
 # 安装 ONNX Runtime (可选)
 # 参考官方文档安装树莓派对应版本
@@ -156,16 +188,21 @@ python main_windows.py
 
 1. **选择模型与标签**：在“设置”界面选择对应的模型文件（.onnx/.param）与标签文件（.txt）。
 2. **配置硬件与规则**：选择硬件加速器、目标选择规则，设置基准宽度等参数。
-3. **相机标定（首次使用前必做一次）**：打印一张 9×6 内角点棋盘格（方格边长需与程序中设置一致），
-   在“设置 → 相机标定”中填入棋盘格规格，点击“采集一帧”开始采集，
-   让棋盘格在画面中变换位置与倾斜角（覆盖四角、至少 10 帧），点击“求解并保存”。
-   内参会持久化，换相机才需重标。
-4. **应用参数**：点击“一键标定”按钮使模型与运行参数生效（此按钮不做相机标定）。
+3. **相机标定（首次使用前必做一次）**：打印一张 9×6 内角点棋盘格（**A4 100% 比例**，方格边长
+   需与程序中设置一致，配套图为 18mm），在“设置 → 相机标定”中把「方格边长」改成实际值，
+   点击“采集一帧”开始采集，让棋盘格在画面中变换位置与倾斜角（覆盖四角、至少 10 帧），
+   点击“求解并保存”。内参会持久化，换相机才需重标。
+   重投影误差 < 0.5 px 优秀、< 1.0 px 可接受。
+4. **应用参数**：点击“应用参数”按钮使模型与运行参数生效（**此按钮不做相机标定**，
+   相机内参由上面第 3 步的“求解并保存”负责）。
 5. **实时监控**：在“监控”界面查看检测结果，微调阈值以优化效果。
 6. **深度分析**：在“深度分析”界面查看各指标曲线（含几何测距曲线），监控系统运行状态。
 7. **录制回放**：在“录制回放”界面点击“开始录制”采集一段场景，
    停止后用“选择录制”载入该会话回放，查看测距曲线与统计摘要。
    回放不依赖现场路况，适合反复调参与演示。
+
+> **验收测量协议见 [`EVALUATION.md`](EVALUATION.md)** —— 卷尺三点测距、整链路帧率、
+> 录制回放三条判据各自「怎么量、记什么、合格线多少」都写在那里，含记录表模板。
 
 
 ## 项目结构
@@ -184,7 +221,9 @@ EdgeSight/
 ├── ui/                    # Qt UI 界面代码
 ├── main_raspberry.py      # 树莓派 Linux 入口程序（冻结，升级中）
 ├── main_windows.py        # Windows 入口程序
+├── AGENTS.md              # 协作约定与开发纪律（开工前必读）
 ├── CHARTER.md             # 项目定位文档
+├── EVALUATION.md          # 验收测量协议（三条门槛判据怎么量、合格线多少）
 └── README.md
 ```
 
