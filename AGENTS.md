@@ -65,6 +65,9 @@
    前台必被超时杀掉。大文件可用 `--filter=blob:none` 先取历史。
 6. **换行符陷阱**：远端存 LF、本地工作区是 CRLF，导致 `git hash-object` 与
    远端 blob 哈希不一致。**这不是内容差异**，比对时需先归一化 `\r\n` → `\n`。
+7. **`git commit -F` 的路径坑**：Git Bash 下 `-F /c/Users/...` 会被路径翻译坑掉、
+   报 `could not read log file`。可靠做法：把信息写进 `.git/COMMIT_MSG_TMP.txt`，
+   用 `-F .git/COMMIT_MSG_TMP.txt`（相对 CWD=仓库根解析），提交后删除临时文件。
 
 ## 沉淀
 

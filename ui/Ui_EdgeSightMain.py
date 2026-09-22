@@ -931,6 +931,108 @@ class Ui_Form(object):
         self.verticalLayout_20.addWidget(self.scrollArea)
 
         self.tabWidget.addTab(self.tab_setting, "")
+        self.tab_record = QWidget()
+        self.tab_record.setObjectName(u"tab_record")
+        self.verticalLayout_rec = QVBoxLayout(self.tab_record)
+        self.verticalLayout_rec.setObjectName(u"verticalLayout_rec")
+        self.groupBox_rec = QGroupBox(self.tab_record)
+        self.groupBox_rec.setObjectName(u"groupBox_rec")
+        self.verticalLayout_rec1 = QVBoxLayout(self.groupBox_rec)
+        self.verticalLayout_rec1.setObjectName(u"verticalLayout_rec1")
+        self.horizontalLayout_rec1 = QHBoxLayout()
+        self.horizontalLayout_rec1.setObjectName(u"horizontalLayout_rec1")
+        self.btn_rec_toggle = QPushButton(self.groupBox_rec)
+        self.btn_rec_toggle.setObjectName(u"btn_rec_toggle")
+        self.btn_rec_toggle.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_rec1.addWidget(self.btn_rec_toggle)
+
+        self.label_rec_status = QLabel(self.groupBox_rec)
+        self.label_rec_status.setObjectName(u"label_rec_status")
+
+        self.horizontalLayout_rec1.addWidget(self.label_rec_status)
+
+
+        self.verticalLayout_rec1.addLayout(self.horizontalLayout_rec1)
+
+        self.label_rec_info = QLabel(self.groupBox_rec)
+        self.label_rec_info.setObjectName(u"label_rec_info")
+        self.label_rec_info.setWordWrap(True)
+
+        self.verticalLayout_rec1.addWidget(self.label_rec_info)
+
+
+        self.verticalLayout_rec.addWidget(self.groupBox_rec)
+
+        self.groupBox_play = QGroupBox(self.tab_record)
+        self.groupBox_play.setObjectName(u"groupBox_play")
+        self.verticalLayout_play = QVBoxLayout(self.groupBox_play)
+        self.verticalLayout_play.setObjectName(u"verticalLayout_play")
+        self.horizontalLayout_play1 = QHBoxLayout()
+        self.horizontalLayout_play1.setObjectName(u"horizontalLayout_play1")
+        self.btn_play_pick = QPushButton(self.groupBox_play)
+        self.btn_play_pick.setObjectName(u"btn_play_pick")
+        self.btn_play_pick.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_play1.addWidget(self.btn_play_pick)
+
+        self.btn_play_toggle = QPushButton(self.groupBox_play)
+        self.btn_play_toggle.setObjectName(u"btn_play_toggle")
+        self.btn_play_toggle.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_play1.addWidget(self.btn_play_toggle)
+
+        self.btn_play_stop = QPushButton(self.groupBox_play)
+        self.btn_play_stop.setObjectName(u"btn_play_stop")
+        self.btn_play_stop.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_play1.addWidget(self.btn_play_stop)
+
+        self.slider_play_pos = QSlider(self.groupBox_play)
+        self.slider_play_pos.setObjectName(u"slider_play_pos")
+        self.slider_play_pos.setMinimum(0)
+        self.slider_play_pos.setMaximum(1000)
+        self.slider_play_pos.setValue(0)
+        self.slider_play_pos.setOrientation(Qt.Orientation.Horizontal)
+
+        self.horizontalLayout_play1.addWidget(self.slider_play_pos)
+
+        self.label_play_pos = QLabel(self.groupBox_play)
+        self.label_play_pos.setObjectName(u"label_play_pos")
+
+        self.horizontalLayout_play1.addWidget(self.label_play_pos)
+
+
+        self.verticalLayout_play.addLayout(self.horizontalLayout_play1)
+
+        self.label_play_info = QLabel(self.groupBox_play)
+        self.label_play_info.setObjectName(u"label_play_info")
+        self.label_play_info.setWordWrap(True)
+
+        self.verticalLayout_play.addWidget(self.label_play_info)
+
+
+        self.verticalLayout_rec.addWidget(self.groupBox_play)
+
+        self.groupBox_play_plot = QGroupBox(self.tab_record)
+        self.groupBox_play_plot.setObjectName(u"groupBox_play_plot")
+        self.verticalLayout_playplot = QVBoxLayout(self.groupBox_play_plot)
+        self.verticalLayout_playplot.setObjectName(u"verticalLayout_playplot")
+        self.plot_replay_distance = PlotWidget(self.groupBox_play_plot)
+        self.plot_replay_distance.setObjectName(u"plot_replay_distance")
+
+        self.verticalLayout_playplot.addWidget(self.plot_replay_distance)
+
+
+        self.verticalLayout_rec.addWidget(self.groupBox_play_plot)
+
+        self.label_replay_summary = QLabel(self.tab_record)
+        self.label_replay_summary.setObjectName(u"label_replay_summary")
+        self.label_replay_summary.setWordWrap(True)
+
+        self.verticalLayout_rec.addWidget(self.label_replay_summary)
+
+        self.tabWidget.addTab(self.tab_record, "")
 
         self.verticalLayout_10.addWidget(self.tabWidget)
 
@@ -1015,5 +1117,18 @@ class Ui_Form(object):
         self.btn_calib_solve.setText(QCoreApplication.translate("Form", u"\u6c42\u89e3\u5e76\u4fdd\u5b58", None))
         self.label_calib_info.setText(QCoreApplication.translate("Form", u"\u672a\u91c7\u96c6\u3002\u8bf7\u8ba9\u68cb\u76d8\u683c\u5728\u753b\u9762\u4e2d\u53d8\u6362\u4f4d\u7f6e\u4e0e\u503e\u659c\u89d2\uff0c\u81f3\u5c11\u91c7\u96c6 10 \u5e27\u3002", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_setting), QCoreApplication.translate("Form", u"\u8bbe\u7f6e", None))
+        self.groupBox_rec.setTitle(QCoreApplication.translate("Form", u"\u5f55\u5236", None))
+        self.btn_rec_toggle.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u5f55\u5236", None))
+        self.label_rec_status.setText(QCoreApplication.translate("Form", u"\u7a7a\u95f2", None))
+        self.label_rec_info.setText(QCoreApplication.translate("Form", u"\u672a\u5f55\u5236\u3002\u5f00\u59cb\u540e\u4f1a\u628a\u753b\u9762\u4e0e\u68c0\u6d4b/\u6d4b\u8ddd\u7ed3\u679c\u5206\u522b\u843d\u76d8\uff0c\u5f55\u5236\u671f\u95f4\u4e0d\u963b\u585e\u4e3b\u94fe\u8def\u3002", None))
+        self.groupBox_play.setTitle(QCoreApplication.translate("Form", u"\u56de\u653e\u5206\u6790", None))
+        self.btn_play_pick.setText(QCoreApplication.translate("Form", u"\u9009\u62e9\u5f55\u5236", None))
+        self.btn_play_toggle.setText(QCoreApplication.translate("Form", u"\u64ad\u653e", None))
+        self.btn_play_stop.setText(QCoreApplication.translate("Form", u"\u505c\u6b62", None))
+        self.label_play_pos.setText(QCoreApplication.translate("Form", u"0/0", None))
+        self.label_play_info.setText(QCoreApplication.translate("Form", u"\u672a\u9009\u62e9\u5f55\u5236\u3002\u56de\u653e\u89c6\u9891\u8f68\u4e0e\u6570\u636e\u8f68\u540c\u6b65\uff0c\u53ef\u5728\u4e0b\u65b9\u67e5\u770b\u6d4b\u8ddd\u66f2\u7ebf\u3002", None))
+        self.groupBox_play_plot.setTitle(QCoreApplication.translate("Form", u"\u6d4b\u8ddd\u66f2\u7ebf\uff08\u56de\u653e\uff09", None))
+        self.label_replay_summary.setText(QCoreApplication.translate("Form", u"\u5c1a\u65e0\u56de\u653e\u6570\u636e\u3002", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_record), QCoreApplication.translate("Form", u"\u5f55\u5236\u56de\u653e", None))
     # retranslateUi
 

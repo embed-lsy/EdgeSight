@@ -7,6 +7,7 @@ from core.camera.opencv_camera import CameraInitThread
 from core.detector import ModelInitThread, YOLODetector
 from core.calibration import (CameraCalibrator, CameraIntrinsics,
                               GeometricRanger, RangingConfig)
+from core.recorder import Recorder, Replayer, FrameRecord
 from typing import Optional
 from collections import deque
 import sys
@@ -38,6 +39,15 @@ class MainWindow(QWidget, Ui_Form):
         # 几何测距器。先无内参构造，load_calibration() 后注入
         self.ranger = GeometricRanger(CameraIntrinsics(),
                                       RangingConfig.from_params(self.global_params))
+        # 录制回放（CHARTER 第 6 条）
+        self.recorder = None          # 非录制时为 None，避免误调
+        self.replayer = None          # 回放器
+        self.replay_timer = None      # 回放驱动定时器
+        self.play_index = 0           # 回放进度（帧）
+        self._replay_seeking = False  # 拖动进度条时抑制回写
+        self._rec_seq = 0             # 录制帧序号
+        self._rec_t0 = 0.0            # 录制起始时刻，用于数据轨时间戳
+
         # 初始化存储图表的环形缓冲区
         self.history_len = 100
         self.sensor_history_x = deque(maxlen=self.history_len)
@@ -287,6 +297,12 @@ class MainWindow(QWidget, Ui_Form):
         self.btn_label_browse.clicked.connect(self.on_label_browse)
         self.btn_calib_capture.clicked.connect(self.on_calib_capture_clicked)
         self.btn_calib_solve.clicked.connect(self.on_calib_solve_clicked)
+        # 录制回放（CHARTER 第 6 条）
+        self.btn_rec_toggle.clicked.connect(self.on_rec_toggle)
+        self.btn_play_pick.clicked.connect(self.on_play_pick)
+        self.btn_play_toggle.clicked.connect(self.on_play_toggle)
+        self.btn_play_stop.clicked.connect(self.on_play_stop)
+        self.slider_play_pos.sliderMoved.connect(self.on_play_seek)
         self.tabWidget.currentChanged.connect(self.on_tab_change)
 
     def bind_model_thres_widgets_realtime(self):#更新标签与值
@@ -422,6 +438,307 @@ class MainWindow(QWidget, Ui_Form):
         self.global_params.pitch_deg = float(value)
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
 
+    # ------------------------------------------------------------------
+    # 录制回放（CHARTER「范围内的」第 6 条）
+    # ------------------------------------------------------------------
+
+    @Slot()
+    def on_rec_toggle(self):
+        """开始/结束录制。"""
+        if self.recorder is None:
+            self.start_recording()
+        else:
+            self.stop_recording()
+
+    def start_recording(self):
+        if self.cap is None or not self.cap.isOpened():
+            QMessageBox.warning(self, '录制错误', '摄像头未连接，无法录制。')
+            return
+        if not hasattr(self, 'current_frame') or self.current_frame is None:
+            QMessageBox.warning(self, '录制错误', '还没有可用画面，请稍候再试。')
+            return
+
+        root = self._recordings_dir()
+        try:
+            self.recorder = Recorder(root=root, fps=float(self.global_params.fps))
+            h, w = self.current_frame.shape[:2]
+            session_dir = self.recorder.start(
+                (h, w, 3),
+                calibrated=self.global_params.calibrated,
+            )
+        except Exception as e:
+            self.recorder = None
+            QMessageBox.critical(self, '录制失败', f'无法开始录制：{e}')
+            return
+
+        self._rec_seq = 0
+        self._rec_t0 = time.time()
+        self.btn_rec_toggle.setText('停止录制')
+        self.label_rec_status.setText('● 录制中')
+        self.label_rec_info.setText(
+            f'正在录制到：\n{session_dir}\n'
+            f'未标定，测距值不可信' if not self.global_params.calibrated else
+            f'正在录制到：\n{session_dir}\n已标定，测距值可用'
+        )
+        self.status_bar.showMessage('开始录制', 3000)
+
+    def stop_recording(self):
+        if self.recorder is None:
+            return
+        try:
+            meta = self.recorder.stop()
+        except Exception as e:
+            QMessageBox.critical(self, '录制失败', f'收尾出错：{e}')
+            self.recorder = None
+            self.btn_rec_toggle.setText('开始录制')
+            self.label_rec_status.setText('空闲')
+            return
+
+        self.recorder = None
+        self.btn_rec_toggle.setText('开始录制')
+        self.label_rec_status.setText('空闲')
+
+        warn = ''
+        if meta.dropped_frames > 0:
+            # 丢帧必须明说：录像的实际内容与时长不符，使用者有权知道
+            warn = f'\n⚠ 有 {meta.dropped_frames} 帧因写盘队列溢出被丢弃（帧率过高或磁盘慢）'
+        if not meta.calibrated_at_record:
+            warn += '\n⚠ 录制时未标定，本次数据轨的距离值全部为 None'
+
+        self.label_rec_info.setText(
+            f'已保存：{self.recorder.session_dir if self.recorder else ""}\n'
+            f'时长 {meta.duration_s:.1f}s，视频 {meta.frame_count} 帧，'
+            f'数据轨 {meta.data_count} 条{warn}'
+        )
+        QMessageBox.information(
+            self, '录制完成',
+            f'时长 {meta.duration_s:.1f}s\n'
+            f'视频帧数 {meta.frame_count}\n'
+            f'数据轨记录 {meta.data_count}\n'
+            f'丢帧 {meta.dropped_frames}{warn}'
+        )
+
+    def _recordings_dir(self) -> str:
+        """录制根目录固定在仓库下 recordings/（已在 .gitignore 中）。"""
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'recordings')
+        os.makedirs(root, exist_ok=True)
+        return root
+
+    @Slot()
+    def on_play_pick(self):
+        """选择一次录制。优先弹目录选择，列出 recordings 下已存在的会话。"""
+        root = self._recordings_dir()
+        sessions = Replayer.list_sessions(root)
+        if not sessions:
+            QMessageBox.information(self, '没有录制',
+                                    f'{root} 下没有找到录制（需含 video.avi）。')
+            return
+        d = QFileDialog.getExistingDirectory(
+            self, '选择录制目录', sessions[-1],
+            QFileDialog.Option.ShowDirsOnly)
+        if not d:
+            return
+        try:
+            self.replayer = Replayer(d)
+        except Exception as e:
+            QMessageBox.critical(self, '加载失败', f'无法读取录制：{e}')
+            self.replayer = None
+            return
+
+        if not self.replayer.open():
+            QMessageBox.critical(self, '加载失败', 'video.avi 无法打开。')
+            self.replayer = None
+            return
+
+        self.play_index = 0
+        total = self.replayer.total_frames
+        self.label_play_pos.setText(f'0/{total}')
+        self.label_play_info.setText(
+            f'已加载：{self.replayer.meta.session}\n'
+            f'时长 {self.replayer.meta.duration_s:.1f}s · '
+            f'视频 {self.replayer.meta.frame_count} 帧 · '
+            f'数据轨 {len(self.replayer.records)} 条 · '
+            f'丢帧 {self.replayer.meta.dropped_frames}'
+        )
+        self.show_replay_summary()
+        self.status_bar.showMessage(f'已加载录制：{self.replayer.meta.session}', 3000)
+
+    @Slot()
+    def on_play_toggle(self):
+        """播放/暂停。回放由 QTimer 驱动，与摄像头取帧同构。"""
+        if self.replayer is None:
+            QMessageBox.information(self, '未加载录制', '请先选择一次录制。')
+            return
+
+        if self.replay_timer is not None and self.replay_timer.isActive():
+            self.replay_timer.stop()
+            self.btn_play_toggle.setText('继续播放')
+            return
+
+        if self.replayer.finished:
+            self.replayer.seek(0)
+            self.play_index = 0
+
+        if self.replay_timer is None:
+            self.replay_timer = QTimer()
+            interval = int(1000 / max(self.global_params.fps, 1))
+            self.replay_timer.setInterval(interval)
+            self.replay_timer.timeout.connect(self.on_replay_tick)
+
+        # 回放期间停掉摄像头取帧，避免两路画面互相覆盖
+        if self.camera_timer.isActive():
+            self.camera_timer.stop()
+        self.replay_timer.start()
+        self.btn_play_toggle.setText('暂停')
+
+    @Slot()
+    def on_play_stop(self):
+        if self.replay_timer is not None and self.replay_timer.isActive():
+            self.replay_timer.stop()
+        self.btn_play_toggle.setText('播放')
+        if self.replayer is not None:
+            self.replayer.seek(0)
+            self.play_index = 0
+            self.label_play_pos.setText(f'0/{self.replayer.total_frames}')
+        # 恢复实时画面
+        if not self.camera_timer.isActive():
+            self.camera_timer.start()
+
+    def on_replay_tick(self):
+        """回放一帧：画面走显示路径，数据走与实时相同的回调。"""
+        if self.replayer is None:
+            # 防御：回放器已被释放但定时器仍在跳（例如切换/关闭竞态）
+            if self.replay_timer is not None and self.replay_timer.isActive():
+                self.replay_timer.stop()
+            return
+        frame, rec = self.replayer.read()
+        if frame is None:
+            if self.replay_timer is not None:
+                self.replay_timer.stop()
+            self.btn_play_toggle.setText('播放')
+            if not self.camera_timer.isActive():
+                self.camera_timer.start()
+            self.status_bar.showMessage('回放结束', 3000)
+            return
+
+        self.play_index = self.replayer.position
+        self._display_frame(frame)
+
+        # 把数据轨记录还原成检测字典，复用实时链路的展示与绘图逻辑
+        target = None
+        if rec is not None and rec.has_target:
+            target = {
+                'x': rec.x, 'y': rec.y, 'width': rec.width,
+                'height': rec.height, 'confidence': rec.confidence,
+                'class_id': rec.class_id,
+            }
+            self.last_detection = target
+            self.global_params.detection_x = rec.x
+            self.global_params.detection_y = rec.y
+            self.global_params.detection_width = rec.width
+            self.global_params.detection_height = rec.height
+            self.global_params.detection_conf = rec.confidence
+            self.global_params.target_category = rec.class_name or '未知'
+            # 回放时不重算距离，直接用录制时的值 —— 保证"看到的就是当时算的"
+            self.global_params.distance = rec.distance
+        else:
+            self.last_detection = None
+            self.global_params.distance = None
+
+        if not self._replay_seeking:
+            total = self.replayer.total_frames
+            self.label_play_pos.setText(f'{self.play_index}/{total}')
+            if total > 0:
+                self.slider_play_pos.setValue(int(self.play_index / total * 1000))
+
+    def _display_frame(self, frame_bgr):
+        """把一帧 BGR 画到界面上（实时与回放共用）。"""
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        h, w, ch = frame_rgb.shape
+        qt_img = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
+        self.lbl_original.setPixmap(QPixmap.fromImage(qt_img).scaled(
+            self.lbl_original.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+        draw_img = frame_rgb.copy()
+        if self.last_detection and self.last_detection.get('confidence', 0) >= 0.3:
+            target = self.last_detection
+            x, y = target['x'], target['y']
+            w_box = target.get('width', 40)
+            h_box = target.get('height', 40)
+            conf = target['confidence']
+            name = self.global_params.target_category or '未知'
+            dist = self.global_params.distance
+            label = f'{name} {conf:.2f}'
+            if dist is not None:
+                label += f' {dist:.2f}m'
+            top_left = (int(x - w_box / 2), int(y - h_box / 2))
+            bottom_right = (int(x + w_box / 2), int(y + h_box / 2))
+            cv2.rectangle(draw_img, top_left, bottom_right, (0, 255, 0), 2)
+            size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            cv2.rectangle(draw_img, (top_left[0], top_left[1] - size[1] - 5),
+                          (top_left[0] + size[0], top_left[1]), (0, 255, 0), -1)
+            cv2.putText(draw_img, label, (top_left[0], top_left[1] - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+        else:
+            cv2.putText(draw_img, 'No Target', (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        h2, w2, ch2 = draw_img.shape
+        qt_img2 = QImage(draw_img.data, w2, h2, ch2 * w2, QImage.Format_RGB888)
+        self.lbl_process.setPixmap(QPixmap.fromImage(qt_img2).scaled(
+            self.lbl_process.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    @Slot(int)
+    def on_play_seek(self, value):
+        """拖动进度条定位。"""
+        if self.replayer is None:
+            return
+        total = self.replayer.total_frames
+        if total <= 0:
+            return
+        target_idx = int(value / 1000 * (total - 1))
+        self._replay_seeking = True
+        try:
+            self.replayer.seek(target_idx)
+            self.play_index = target_idx
+            self.label_play_pos.setText(f'{target_idx}/{total}')
+        finally:
+            self._replay_seeking = False
+
+    def show_replay_summary(self):
+        """回放数据的统计摘要 + 测距曲线。
+
+        曲线只画有值的点：距离为 None 的帧不画 0 ——
+        0 米是"有效但错误"的读数，None 是"没有读数"，两者在图上必须可区分。
+        """
+        if self.replayer is None:
+            return
+        s = self.replayer.summary()
+        dist_txt = '不可解算'
+        if s['distance_min'] is not None:
+            dist_txt = f'{s["distance_min"]:.2f} ~ {s["distance_max"]:.2f} m'
+        conf_txt = ('—' if s['confidence_mean'] is None
+                    else f'{s["confidence_mean"]:.3f}')
+        calib_txt = '已标定' if s['calibrated_at_record'] else '未标定（距离不可信）'
+        self.label_replay_summary.setText(
+            f'会话 {s["session"]} · 时长 {s["duration_s"]:.1f}s · '
+            f'视频 {s["frame_count"]} 帧 · 数据轨 {s["data_count"]} 条 · '
+            f'丢帧 {s["dropped_frames"]}\n'
+            f'有目标 {s["target_frames"]} 帧 · 可测距 {s["ranged_frames"]} 帧 · '
+            f'距离范围 {dist_txt} · 平均置信度 {conf_txt} · 录制时{calib_txt}'
+        )
+
+        ts, ds = self.replayer.distance_series()
+        if not hasattr(self, '_replay_curve'):
+            self.plot_replay_distance.addLegend()
+            self._replay_curve = self.plot_replay_distance.plot(
+                [], [], pen=pg.mkPen('g', width=2), name='几何测距')
+        self._replay_curve.setData(ts, ds)
+        self.plot_replay_distance.setLabel('bottom', '时间', units='s')
+        self.plot_replay_distance.setLabel('left', '距离', units='m')
+        self.plot_replay_distance.showGrid(x=True, y=True)
+
     def update_param_realtime(self,param_name,value,label,fmt):
         setattr(self.global_params,param_name,value)
         label.setText(fmt % value)
@@ -430,7 +747,7 @@ class MainWindow(QWidget, Ui_Form):
     #界面交互
     @Slot(int)
     def on_tab_change(self,index):
-        tab_name=['监控','深度分析','设置']
+        tab_name=['监控','深度分析','设置','录制回放']
         currebt_tab=tab_name[index]
         print(f"当前选项卡：{currebt_tab}")
         if currebt_tab=='深度分析':
@@ -439,6 +756,9 @@ class MainWindow(QWidget, Ui_Form):
                 self.analysis_timer.start()
         elif currebt_tab=='设置':
             self.refresh_calib_widgets()
+        elif currebt_tab=='录制回放':
+            if self.replayer is not None:
+                self.show_replay_summary()
         elif self.analysis_timer.isActive() and currebt_tab!='深度分析' and self.global_params.plot_enable:
             self.analysis_timer.stop()     
                 
@@ -561,15 +881,20 @@ class MainWindow(QWidget, Ui_Form):
             self.global_params.base_width=0.0
             self.lcd_credibility.display(0)
         
+        # 几何测距：录制中必须算（数据轨要存），否则只在开启分析曲线时算。
+        # 这是刻意的解耦——测距的触发不该依赖"用户是否打开了绘图"。
+        need_range = self.global_params.plot_enable or self.recorder is not None
+        dist = None
+        if need_range and self.global_params.detection_height > 0:
+            dist = self.ranger.distance_from_box(
+                target if isinstance(target, dict) else {},
+                self.global_params.target_category,
+            )
+        self.global_params.distance = dist
+
         if self.global_params.plot_enable:
-            # 真标定 + 几何测距：无内参时返回 None，绘图落 0，但绝不假装有距离
-            dist = None
-            if self.global_params.detection_height > 0:
-                dist = self.ranger.distance_from_box(
-                    target if isinstance(target, dict) else {},
-                    self.global_params.target_category,
-                )
-            self.global_params.distance = dist
+            # 距离为 None 时曲线落 0（pyqtgraph 不画 None），但状态栏与录制
+            # 里的值保持 None —— 绝不把"没有读数"伪装成"读到 0 米"
             distance = dist if dist is not None else 0.0
             self.sensor_history_x.append(self.global_params.detection_x)
             self.sensor_history_y.append(self.global_params.detection_y)
@@ -581,6 +906,18 @@ class MainWindow(QWidget, Ui_Form):
             self.time_history.append(self.time_counter)
             self.sensor_history_conf_thres.append(self.global_params.confidence_thres)
             self.time_counter += 1.0 / self.global_params.sample_freq
+
+        # 录制：数据轨与视频轨分开存，此处只追加一条记录（非阻塞）
+        if self.recorder is not None:
+            self._rec_seq += 1
+            self.recorder.push_record(FrameRecord.from_detection(
+                seq=self._rec_seq,
+                t=time.time() - self._rec_t0,
+                target=target if isinstance(target, dict) else None,
+                class_name=self.global_params.target_category,
+                distance=dist,
+                inference_fps=self.global_params.inference_fps,
+            ))
             
     def _on_calib_frame(self, frame_bgr):
         """标定采集回调：检测棋盘格角点并给出实时反馈。
@@ -625,53 +962,16 @@ class MainWindow(QWidget, Ui_Form):
             # 标定采集中：把当前帧喂给标定器，不改动显示逻辑
             if self.calibrator is not None:
                 self._on_calib_frame(frame)
+
+            # 录制：投入写盘队列（非阻塞，满则丢帧并计数）
+            if self.recorder is not None:
+                self.recorder.push_frame(frame)
+
+            # 保留 RGB 副本供检测线程使用
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             self.current_frame = frame_rgb.copy()
-            # 显示原始图像
-            h, w, ch = frame_rgb.shape
-            bytes_per_line = ch * w
-            qt_img = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
-            self.lbl_original.setPixmap(QPixmap.fromImage(qt_img).scaled(self.lbl_original.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation))
-            # 绘制检测结果到处理图像
-            draw_img = frame_rgb.copy()  # 复制一份用于绘制
-            if hasattr(self, 'last_detection') and self.last_detection and self.last_detection['confidence'] >= 0.3:
-                target = self.last_detection
-                x, y = target['x'], target['y']
-                w_box, h_box = target.get('width', 40), target.get('height', 40)
-                conf = target['confidence']
-                class_id = target['class_id']
-                
-                # 获取类别名
-                if self.detector and hasattr(self.detector, 'labels') and self.detector.labels:
-                    if class_id < len(self.detector.labels):
-                        label = f"{self.detector.labels[class_id]} {conf:.2f}"
-                    else:
-                        label = f"未知 {conf:.2f}"
-                else:
-                    label = f"未知 {conf:.2f}"
-                
-                # 绘制矩形框
-                top_left = (int(x - w_box/2), int(y - h_box/2))
-                bottom_right = (int(x + w_box/2), int(y + h_box/2))
-                cv2.rectangle(draw_img, top_left, bottom_right, (0, 255, 0), 2)
-                
-                # 绘制标签背景
-                label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                cv2.rectangle(draw_img,
-                            (top_left[0], top_left[1] - label_size[1] - 5),
-                            (top_left[0] + label_size[0], top_left[1]),
-                            (0, 255, 0), -1)
-                # 绘制文字
-                cv2.putText(draw_img, label,(top_left[0], top_left[1] - 5),cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-            else:
-                cv2.putText(draw_img, 'No Target',(10, 30), cv2.FONT_HERSHEY_SIMPLEX,0.7, (0, 0, 255), 2)
-                self.label_target_category.setText('未知')
-            
-            # 显示处理图像
-            h2, w2, ch2 = draw_img.shape
-            bytes_per_line2 = ch2 * w2
-            qt_img2 = QImage(draw_img.data, w2, h2, bytes_per_line2, QImage.Format_RGB888)
-            self.lbl_process.setPixmap(QPixmap.fromImage(qt_img2).scaled(self.lbl_process.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            # 显示复用统一入口（实时与回放共用同一套绘制逻辑）
+            self._display_frame(frame)
         except Exception as e:
             print(f"帧处理出错：{e}")
 
@@ -684,6 +984,21 @@ class MainWindow(QWidget, Ui_Form):
     def closeEvent(self, event):
         # 停止采集，避免关闭时还持有标定器
         self.calibrator = None
+        # 录制中关闭：必须收尾落盘，否则数据轨丢失、视频文件损坏
+        if self.recorder is not None:
+            try:
+                meta = self.recorder.stop()
+                print(f'[录制] 关闭时收尾：{meta.frame_count} 帧，'
+                      f'{meta.data_count} 条记录，丢帧 {meta.dropped_frames}')
+            except Exception as e:
+                print(f'[录制] 关闭收尾失败：{e}')
+            self.recorder = None
+        # 回放收尾
+        if self.replay_timer is not None and self.replay_timer.isActive():
+            self.replay_timer.stop()
+        if self.replayer is not None:
+            self.replayer.close()
+            self.replayer = None
         # 停止所有定时器
         for timer in [self.update_timer, self.camera_timer, self.analysis_timer]:
             if timer.isActive():

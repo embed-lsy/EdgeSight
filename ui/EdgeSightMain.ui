@@ -1216,6 +1216,163 @@ QLineEdit, QTextEdit {
        </item>
       </layout>
      </widget>
+     <widget class="QWidget" name="tab_record">
+      <attribute name="title">
+       <string>录制回放</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout_rec">
+       <item>
+        <widget class="QGroupBox" name="groupBox_rec">
+         <property name="title">
+          <string>录制</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_rec1">
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_rec1">
+            <item>
+             <widget class="QPushButton" name="btn_rec_toggle">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>40</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>开始录制</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="label_rec_status">
+              <property name="text">
+               <string>空闲</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_rec_info">
+            <property name="text">
+             <string>未录制。开始后会把画面与检测/测距结果分别落盘，录制期间不阻塞主链路。</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="groupBox_play">
+         <property name="title">
+          <string>回放分析</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_play">
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_play1">
+            <item>
+             <widget class="QPushButton" name="btn_play_pick">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>40</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>选择录制</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_play_toggle">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>40</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>播放</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_play_stop">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>40</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>停止</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSlider" name="slider_play_pos">
+              <property name="minimum">
+               <number>0</number>
+              </property>
+              <property name="maximum">
+               <number>1000</number>
+              </property>
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="orientation">
+               <enum>Qt::Orientation::Horizontal</enum>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="label_play_pos">
+              <property name="text">
+               <string>0/0</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_play_info">
+            <property name="text">
+             <string>未选择录制。回放视频轨与数据轨同步，可在下方查看测距曲线。</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="groupBox_play_plot">
+         <property name="title">
+          <string>测距曲线（回放）</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_playplot">
+          <item>
+           <widget class="PlotWidget" name="plot_replay_distance" native="true"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="label_replay_summary">
+         <property name="text">
+          <string>尚无回放数据。</string>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
     </widget>
    </item>
   </layout>
