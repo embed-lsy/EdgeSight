@@ -1205,7 +1205,7 @@ QLineEdit, QTextEdit {
                    </size>
                   </property>
                   <property name="text">
-                   <string>采集一帧</string>
+                   <string>开始采集</string>
                   </property>
                  </widget>
                 </item>
@@ -1227,7 +1227,7 @@ QLineEdit, QTextEdit {
               <item>
                <widget class="QLabel" name="label_calib_info">
                 <property name="text">
-                 <string>未采集。请让棋盘格在画面中变换位置与倾斜角，至少采集 10 帧。</string>
+                 <string>未采集。点「开始采集」，让棋盘格在画面中变换位置与倾斜角；采够 10 帧后点「求解并保存」。</string>
                 </property>
                 <property name="wordWrap">
                  <bool>true</bool>

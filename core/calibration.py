@@ -115,6 +115,50 @@ class RangingConfig:
 # 标定
 # ---------------------------------------------------------------------------
 
+MIN_CALIB_FRAMES = 4        # 少于 4 帧方程数不足，解必然退化
+
+
+def solve_intrinsics(object_points, image_points, image_size) -> CameraIntrinsics:
+    """由棋盘角点求解相机内参 —— **纯函数**，不碰 UI、不碰线程。
+
+    为什么单独抽出来（CHARTER 开发纪律「先单独验证工具函数，再接上层」）：
+
+    1. ``cv2.calibrateCamera`` 是**秒级长任务** —— 本机实测 50 帧 640x480
+       耗时 **17.06 s**（见 `E:\\WorkBuddy-Work\\scripts\\measure_ui_block.py`）；
+    2. 抽成纯函数后可以脱离 UI 单独测「解得对不对、要多久」；
+    3. UI 里只把它丢进子线程执行，主线程全程不碰 OpenCV，界面不会被冻住。
+
+    参数
+    ----
+    object_points : 各帧棋盘角点的世界坐标（z=0 平面）
+    image_points  : 各帧检出的角点像素坐标，与 object_points 一一对应
+    image_size    : (width, height)，像素
+    """
+    n = len(image_points)
+    if n < MIN_CALIB_FRAMES:
+        raise ValueError(
+            f'标定帧数不足（当前 {n} 帧，至少需要 {MIN_CALIB_FRAMES} 帧，'
+            f'建议 10 帧以上且棋盘格姿态有变化）'
+        )
+    if not image_size or image_size[0] <= 0 or image_size[1] <= 0:
+        raise ValueError('没有可用的图像尺寸，请先采集帧')
+
+    ret, mtx, dist, _, _ = cv2.calibrateCamera(
+        object_points, image_points, image_size, None, None
+    )
+
+    return CameraIntrinsics(
+        fx=float(mtx[0, 0]),
+        fy=float(mtx[1, 1]),
+        cx=float(mtx[0, 2]),
+        cy=float(mtx[1, 2]),
+        dist_coeffs=[float(v) for v in dist.ravel()],
+        image_size=image_size,
+        rms_error=float(ret),
+        calibrated=True,
+    )
+
+
 class CameraCalibrator:
     """棋盘格标定器。
 
@@ -190,30 +234,14 @@ class CameraCalibrator:
     # -- 求解 ---------------------------------------------------------------
 
     def calibrate(self) -> CameraIntrinsics:
-        """求解内参与畸变系数。建议至少 10 帧，且棋盘格姿态要有变化。"""
-        if self.frame_count < 4:
-            raise ValueError(
-                f'标定帧数不足（当前 {self.frame_count} 帧，至少需要 4 帧，'
-                f'建议 10 帧以上且棋盘格姿态有变化）'
-            )
-        if self.image_size is None:
-            raise ValueError('没有可用的图像尺寸，请先采集帧')
+        """求解内参与畸变系数。建议至少 10 帧，且棋盘格姿态要有变化。
 
-        ret, mtx, dist, _, _ = cv2.calibrateCamera(
-            self.object_points, self.image_points, self.image_size, None, None
-        )
-
-        intr = CameraIntrinsics(
-            fx=float(mtx[0, 0]),
-            fy=float(mtx[1, 1]),
-            cx=float(mtx[0, 2]),
-            cy=float(mtx[1, 2]),
-            dist_coeffs=[float(v) for v in dist.ravel()],
-            image_size=self.image_size,
-            rms_error=float(ret),
-            calibrated=True,
-        )
-        return intr
+        ⚠️ 这是**同步阻塞**调用（本机实测 50 帧约 17 s）。
+        UI 里不要直接调它 —— 必须走子线程（`CalibSolveThread`），
+        否则整个界面会冻住十几秒（2026-09-23 用户实际故障）。
+        """
+        return solve_intrinsics(self.object_points, self.image_points,
+                                self.image_size)
 
     # -- 持久化 -------------------------------------------------------------
 

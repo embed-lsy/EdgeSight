@@ -90,8 +90,8 @@
       <li>方格边长：<span class="kbd">18.0</span>（程序默认已是 18；如果校验尺不是 100 mm，改成你算出的实际值）</li>
     </ul>
   </li>
-  <li>点 <span class="kbd">采集一帧</span> 按钮 —— 按钮会变成「停止采集」。<br>
-    <span class="meta">注：按钮名叫"采集一帧"，实际是"开始连续采集"，点一次就行。</span></li>
+  <li>点 <span class="kbd">开始采集</span> 按钮 —— 按钮会变成「停止采集」。
+    <span class="meta">（点一次就开始连续采集，不需要反复点。）</span></li>
   <li>拿起棋盘格面对摄像头，慢慢变换位置和角度，让棋盘：
     <ul>
       <li>出现在画面的<strong>各个角落</strong>（左上、右下都要有）</li>
@@ -103,7 +103,14 @@
     显示 <span class="kbd">已采集 X 帧（当前帧检测到棋盘格 ✓）</span> → 正常，继续换姿势；<br>
     显示 <span class="kbd">当前帧未检测到棋盘格</span> → 说明这一帧没采上，换个角度或挪近一点。<br>
     <strong>总数采到 15 帧以上</strong>就可以停（至少 10 帧）。</li>
-  <li>再点一次 <span class="kbd">停止采集</span>，然后点 <span class="kbd">求解并保存</span>。</li>
+  <li>直接点 <span class="kbd">求解并保存</span>（<strong>不用先停止采集</strong>）。
+    <div class="box warn-box">
+      <strong>2026-09-23 修正</strong>：旧版这里写的是"先点『停止采集』再求解"，
+      而旧程序里那个按钮会<strong>把已采的帧整批丢弃</strong>，于是求解时弹
+      "还没有采集到有效帧"、白采一场。程序已修：暂停采集<strong>不再丢帧</strong>。
+      现在两条路都行 —— 直接求解，或先「停止采集」（帧会保留）再求解。
+    </div>
+  </li>
   <li>弹窗出来后<strong>把弹窗里的数字记下来</strong>：
     <div class="box ok-box">
       要记：<strong>fx、fy、重投影误差</strong> 这三个数。<br>

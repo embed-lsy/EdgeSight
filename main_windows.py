@@ -6,7 +6,7 @@ from core.config.windows_global_params import GlobalParams
 from core.camera.opencv_camera import CameraInitThread
 from core.detector import ModelInitThread, YOLODetector
 from core.calibration import (CameraCalibrator, CameraIntrinsics,
-                              GeometricRanger, RangingConfig)
+                              GeometricRanger, RangingConfig, solve_intrinsics)
 from core.recorder import Recorder, Replayer, FrameRecord
 from typing import Optional
 from collections import deque
@@ -16,6 +16,35 @@ import numpy as np
 import pyqtgraph as pg
 import os
 import time
+
+
+class CalibSolveThread(QThread):
+    """把「求解相机内参」放到子线程执行。
+
+    为什么必须异步（2026-09-23 用户实际故障）：``cv2.calibrateCamera`` 是
+    **秒级长任务** —— 本机实测 50 帧 640x480 要 **17.06 s**。旧代码在按钮
+    槽函数里同步调用，一点「求解并保存」整个界面就冻住十几秒不动。
+
+    设计要点：
+    - 只吃**快照**（点列表的拷贝）：线程在跑时主线程照旧接帧也不影响它；
+    - 线程里只调纯函数 `solve_intrinsics`，不碰任何 Qt 控件；
+    - 结果用信号回主线程，弹窗 / 写文件 / 改状态都在主线程做（Qt 要求）。
+    """
+
+    solved = Signal(object, str)          # (CameraIntrinsics | None, 错误信息)
+
+    def __init__(self, object_points, image_points, image_size, parent=None):
+        super().__init__(parent)
+        self._objp = list(object_points)
+        self._imgp = list(image_points)
+        self._size = tuple(image_size) if image_size else (0, 0)
+
+    def run(self):
+        try:
+            self.solved.emit(
+                solve_intrinsics(self._objp, self._imgp, self._size), '')
+        except Exception as e:
+            self.solved.emit(None, str(e))
 
 
 class MainWindow(QWidget, Ui_Form):
@@ -36,6 +65,11 @@ class MainWindow(QWidget, Ui_Form):
         self.is_loading_model=False
         # 标定状态：不采集时 calibrator 为 None，避免误采集普通帧
         self.calibrator = None
+        # 是否正在采集标定帧。与 calibrator 分开：暂停采集不丢已采帧
+        self._collecting = False
+        # 是否正在子线程求解内参。求解期间禁止重复触发（实测 50 帧要十几秒）
+        self._solving = False
+        self._solve_thread = None
         # 几何测距器。先无内参构造，load_calibration() 后注入
         self.ranger = GeometricRanger(CameraIntrinsics(),
                                       RangingConfig.from_params(self.global_params))
@@ -185,8 +219,13 @@ class MainWindow(QWidget, Ui_Form):
             
             self.detector=None #去除旧对象
 
-        self.status_bar.showMessage("正在初始化AI模型...")
-        self.model_thread = ModelInitThread(self.global_params.mode_path,self.global_params.hardware_accel)
+        self.status_bar.showMessage(
+            "正在后台加载 AI 模型……（界面可继续操作，加载完自动生效）")
+        self.model_thread = ModelInitThread(
+            self.global_params.mode_path,
+            self.global_params.hardware_accel,
+            self.global_params.label_path,      # 标签文件也在子线程里读
+        )
         self.model_thread.init_finished.connect(self.on_model_init_finished)
         self.model_thread.start()
 
@@ -362,11 +401,15 @@ class MainWindow(QWidget, Ui_Form):
             self.global_params.invalid_reason = '标定文件内容无效'
 
     def refresh_calib_widgets(self):
-        """把标定状态同步到设置页。"""
+        """把标定状态同步到设置页。
+
+        注意顺序：**采集进度优先**。本函数在切到「设置」页签时也会被调用，
+        若把进度提示写在前面，用户切换一次页签就会看到"未标定…"而以为帧丢了。
+        """
         if self.global_params.calibrated:
             intr = self.global_params.intrinsics
             self.label__calibrate_status.setText('已标定')
-            self.label_calib_info.setText(
+            info = (
                 f'fx={intr.fx:.1f}  fy={intr.fy:.1f}  '
                 f'cx={intr.cx:.1f}  cy={intr.cy:.1f}\n'
                 f'重投影误差 {intr.rms_error:.3f} px '
@@ -375,10 +418,18 @@ class MainWindow(QWidget, Ui_Form):
         else:
             self.label__calibrate_status.setText('未标定')
             reason = self.global_params.invalid_reason or '未标定'
-            self.label_calib_info.setText(
+            info = (
                 f'{reason}。测距不可用（不会给出猜测值）。\n'
                 f'请让棋盘格在画面中变换位置与倾斜角，至少采集 10 帧后求解。'
             )
+
+        n = self._calib_frame_count()
+        self.btn_calib_solve.setEnabled(n > 0)
+        if n > 0:
+            state = '采集中' if getattr(self, '_collecting', False) else '已暂停采集'
+            info = (f'{state}：已采集 {n} 帧（没有丢弃）。\n'
+                    f'点「求解并保存」解算内参；想补采就再点「开始采集」。')
+        self.label_calib_info.setText(info)
 
     def _make_calibrator(self):
         cols = self.spin_pattern_cols.value()
@@ -386,40 +437,103 @@ class MainWindow(QWidget, Ui_Form):
         square_m = self.spin_square_mm.value() / 1000.0
         return CameraCalibrator(pattern_size=(cols, rows), square_size=square_m)
 
+    def _calib_frame_count(self) -> int:
+        return self.calibrator.frame_count if self.calibrator is not None else 0
+
+    def _set_collecting(self, collecting: bool):
+        """切换「采集中/已暂停」状态，并同步按钮文字与「求解并保存」的可用性。"""
+        self._collecting = collecting
+        self.btn_calib_capture.setText('停止采集' if collecting else '开始采集')
+        self.btn_calib_solve.setEnabled(self._calib_frame_count() > 0)
+
     @Slot()
     def on_calib_capture_clicked(self):
-        """开始/停止采集。只在采集状态下接帧，避免误采普通画面。"""
+        """开始/暂停采集。只在采集状态下接帧，避免误采普通画面。
+
+        ⚠️ 暂停**绝不清空已采帧**（2026-09-23 用户实际故障）：
+        采到 50 帧后点了一下这个按钮（当时它写着"停止采集"），再去求解，
+        弹出"还没有采集到有效帧"，整场白采。根因就是旧代码在这里
+        ``self.calibrator = None``，把已采的 50 帧连同标定器一起丢了，
+        而界面只提示"已停止采集。"，用户根本不知道帧没了。
+        现在改成：暂停只停止接帧，帧留着，随时可求解或继续补采。
+        """
         if self.cap is None or not self.cap.isOpened():
             QMessageBox.warning(self, '标定错误', '摄像头未连接，无法进行标定！')
             return
 
-        if self.calibrator is None:
-            self.calibrator = self._make_calibrator()
-            self.btn_calib_capture.setText('停止采集')
-            self.btn_calib_solve.setEnabled(True)
+        if not getattr(self, '_collecting', False):
+            if self.calibrator is None:          # 只在没有存量帧时新建
+                self.calibrator = self._make_calibrator()
+            self._set_collecting(True)
+            n = self._calib_frame_count()
+            head = f'继续采集中（已有 {n} 帧）' if n else '采集中'
             self.label_calib_info.setText(
-                '采集中：请让棋盘格在画面中变换位置与倾斜角（已采集 0 帧）')
+                f'{head}：请让棋盘格在画面中变换位置与倾斜角。（已采集 {n} 帧）')
         else:
-            self.calibrator = None
-            self.btn_calib_capture.setText('采集一帧')
-            self.label_calib_info.setText('已停止采集。')
+            self._set_collecting(False)
+            n = self._calib_frame_count()
+            self.label_calib_info.setText(
+                f'已暂停采集，已保留 {n} 帧（没有丢弃）。\n'
+                f'点「求解并保存」解算内参；想补采就再点「开始采集」。')
 
     @Slot()
     def on_calib_solve_clicked(self):
-        """求解内参并持久化。"""
+        """求解内参并持久化 —— **丢到子线程去解**，界面不冻。
+
+        2026-09-23 修正：旧代码在这里同步调 ``self.calibrator.calibrate()``，
+        而 ``cv2.calibrateCamera`` 实测 50 帧要 **17 s**，点一下按钮整个界面
+        就卡住十几秒不动。现在本槽函数只做「停接帧 → 丢线程 → 立刻返回」，
+        结果由 ``on_calib_solved`` 处理。
+        """
+        if self._solving:
+            return                       # 已在求解，忽略重复点击
+
         if self.calibrator is None or self.calibrator.frame_count == 0:
-            QMessageBox.warning(self, '标定错误', '还没有采集到有效帧。')
+            QMessageBox.warning(
+                self, '标定错误',
+                '还没有采集到有效帧。\n\n'
+                '请先点「开始采集」，让棋盘格完整出现在画面里；\n'
+                '提示出现「检测到棋盘格 ✓」后才算采到一帧。')
             return
 
+        # 求解期间停止接帧（避免边解边往点列表里加），但**帧全部保留**
+        self._set_collecting(False)
+        self._solving = True
         self.btn_calib_solve.setEnabled(False)
-        QApplication.processEvents()
+
+        n = self.calibrator.frame_count
+        self.label_calib_info.setText(
+            f'正在求解内参……（共 {n} 帧）\n'
+            f'实测 50 帧约需十几秒；界面可以继续操作，解完会自动弹结果。')
+        self.status_bar.showMessage(f'正在后台求解相机内参（{n} 帧）……')
+
+        self._solve_thread = CalibSolveThread(
+            self.calibrator.object_points, self.calibrator.image_points,
+            self.calibrator.image_size, self)
+        self._solve_thread.solved.connect(self.on_calib_solved)
+        self._solve_thread.start()
+
+    @Slot(object, str)
+    def on_calib_solved(self, intr, err):
+        """求解线程回主线程的结果处理：写盘、生效、体检、汇报。
+
+        线程里不碰任何 Qt 控件；弹窗/写文件/改状态一律回到主线程做。
+        """
+        self._solving = False
+        self.status_bar.clearMessage()
+        self.btn_calib_solve.setEnabled(self._calib_frame_count() > 0)
+
+        if intr is None:
+            self.label_calib_info.setText(
+                f'求解失败：{err}\n（已采的帧仍保留，可补采后重试）')
+            QMessageBox.critical(self, '标定失败', f'求解内参出错：{err}')
+            return
+
         try:
-            intr = self.calibrator.calibrate()
             CameraCalibrator.save(intr, self._calib_file)
         except Exception as e:
-            self.label_calib_info.setText(f'求解失败：{e}')
-            QMessageBox.critical(self, '标定失败', f'求解内参出错：{e}')
-            self.btn_calib_solve.setEnabled(True)
+            self.label_calib_info.setText(f'内参写不进去：{e}（已采的帧仍保留）')
+            QMessageBox.critical(self, '标定失败', f'标定文件写入失败：{e}')
             return
 
         # 求解成功后立即生效，不必重启
@@ -427,19 +541,33 @@ class MainWindow(QWidget, Ui_Form):
         self.global_params.calibrated = intr.is_valid()
         self.global_params.invalid_reason = ''
         self.ranger.update_intrinsics(intr)
-        self.calibrator = None
-        self.btn_calib_capture.setText('采集一帧')
+        self.calibrator = None            # 成功后清空：下次「开始采集」是全新一轮
+        self._set_collecting(False)
         self.refresh_calib_widgets()
 
-        quality = ('优' if intr.rms_error < 0.5
-                   else '可接受' if intr.rms_error < 1.0 else '偏低，建议重采')
-        QMessageBox.information(
-            self, '标定完成',
-            f'内参已保存到：\n{self._calib_file}\n\n'
-            f'fx={intr.fx:.1f}  fy={intr.fy:.1f}\n'
-            f'cx={intr.cx:.1f}  cy={intr.cy:.1f}\n'
-            f'重投影误差={intr.rms_error:.3f}px（{quality}）'
-        )
+        w, h = intr.image_size
+        warns = []
+        if intr.rms_error >= 1.0:
+            warns.append(f'重投影误差 {intr.rms_error:.3f} px 偏高（>1.0 已不可接受）')
+        if not (0.15 * w < intr.cx < 0.85 * w) or not (0.15 * h < intr.cy < 0.85 * h):
+            warns.append(f'主点 (cx={intr.cx:.0f}, cy={intr.cy:.0f}) 明显偏离画面中心'
+                         f'（画面 {w}x{h}）')
+
+        detail = (f'内参已保存到：\n{self._calib_file}\n\n'
+                  f'fx={intr.fx:.1f}  fy={intr.fy:.1f}\n'
+                  f'cx={intr.cx:.1f}  cy={intr.cy:.1f}\n'
+                  f'重投影误差={intr.rms_error:.3f} px')
+
+        if warns:
+            QMessageBox.warning(
+                self, '标定完成，但质量存疑',
+                detail + '\n\n' + '\n'.join('· ' + s for s in warns) +
+                '\n\n常见原因：棋盘姿态变化不够（只在同一角度平移），或画面模糊、反光。\n'
+                '建议重采：让棋盘走遍画面四角，并做出明显倾斜（左右各约 20°）。\n'
+                '（结果已保存，可以先用；想重标就再点「开始采集」。）')
+        else:
+            quality = '优' if intr.rms_error < 0.5 else '可接受'
+            QMessageBox.information(self, '标定完成', detail + f'\n\n质量：{quality}')
 
     @Slot()
     def on_pitch_changed(self, value):
@@ -949,10 +1077,12 @@ class MainWindow(QWidget, Ui_Form):
             print(f'[标定] 采集帧出错：{e}')
             return
         n = self.calibrator.frame_count
+        self.btn_calib_solve.setEnabled(n > 0)   # 有帧就能求解，不必先暂停采集
+        tip = ('帧数已够，可点「求解并保存」' if n >= 10
+               else '建议继续变换姿态，覆盖画面四角与倾斜')
         if ok:
             self.label_calib_info.setText(
-                f'已采集 {n} 帧（当前帧检测到棋盘格 ✓）\n'
-                f'建议继续变换姿态，覆盖画面四角与倾斜')
+                f'已采集 {n} 帧（当前帧检测到棋盘格 ✓）\n{tip}')
         else:
             self.label_calib_info.setText(
                 f'已采集 {n} 帧（当前帧未检测到棋盘格）\n'
@@ -974,8 +1104,12 @@ class MainWindow(QWidget, Ui_Form):
         if not ret:
             return
         try:
-            # 标定采集中：把当前帧喂给标定器，不改动显示逻辑
-            if self.calibrator is not None:
+            # 标定采集中：把当前帧喂给标定器，不改动显示逻辑。
+            # ⚠️ 门条件必须是「采集中且标定器存在」，不能只看 calibrator 是否为 None：
+            # 「停止采集」只把 _collecting 置回 False（帧全部保留），若这里不看这个标志，
+            # 暂停后仍会持续接帧 —— 与按钮语义和文档不符，且会立刻覆盖掉
+            # 「已暂停采集，已保留 N 帧」这句提示，用户又会以为帧丢了。
+            if self.calibrator is not None and getattr(self, '_collecting', False):
                 self._on_calib_frame(frame)
 
             # 录制：投入写盘队列（非阻塞，满则丢帧并计数）
@@ -999,6 +1133,21 @@ class MainWindow(QWidget, Ui_Form):
     def closeEvent(self, event):
         # 停止采集，避免关闭时还持有标定器
         self.calibrator = None
+        self._collecting = False
+        # 求解线程可能正卡在 cv2.calibrateCamera（十几秒），**必须等它退出**，
+        # 否则关窗时线程还在跑会崩。顺便断开信号：关窗口不该再弹标定结果。
+        th = getattr(self, '_solve_thread', None)
+        if th is not None and th.isRunning():
+            try:
+                th.solved.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            print('[标定] 关闭时等待求解线程结束……')
+            th.wait()
+        # 模型加载线程同理（在子线程里建 ORT 会话）
+        mt = getattr(self, 'model_thread', None)
+        if mt is not None and mt.isRunning():
+            mt.wait()
         # 录制中关闭：必须收尾落盘，否则数据轨丢失、视频文件损坏
         if self.recorder is not None:
             try:

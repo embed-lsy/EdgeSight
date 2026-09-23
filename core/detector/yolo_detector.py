@@ -8,30 +8,55 @@ from .postprocess import postprocess_yolov8,postprocess_yolov5  # 导入后处�
 
 
 class ModelInitThread(QThread):
+    """在**子线程**里建 ONNX Runtime 会话、读标签文件。
+
+    ⚠️ 2026-09-23 修正：原先 ``run()`` 是个空壳（真正的加载代码被注释掉了），
+    于是 ``ort.InferenceSession(...)`` 实际落在主线程的
+    ``MainWindow.on_model_init_finished`` 里执行 —— 加载期间整个界面卡住。
+    现在把「耗时的那一段」搬回本线程：主线程只做装配，
+    ``load_model`` 直接采用这里建好的 session，不再重复建。
+    """
+
     init_finished = Signal(bool, str, object)
 
-    def __init__(self, model_path: str, hardware_accel='CPU'):
+    def __init__(self, model_path: str, hardware_accel='CPU', label_path: str = ''):
         super().__init__()
         self.model_path = model_path
         self.hardware_accel = hardware_accel
+        self.label_path = label_path
 
     def run(self):
         try:
             if not self.model_path or not os.path.isfile(self.model_path):
                 self.init_finished.emit(True, "未指定模型路径，跳过加载", None)
                 return
-            '''
-            self.init_finished.emit(True, "开始加载模型……", None)
-            model = cv2.dnn.readNetFromONNX(self.model_path)
-            model.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-            if self.hardware_accel == 'CPU':
-                model.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-            elif self.hardware_accel == 'GPU':
-                model.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-            elif self.hardware_accel == 'NPU':
-                model.setPreferableTarget(cv2.dnn.DNN_TARGET_MYRIAD)
-            '''
-            self.init_finished.emit(True, f"模型加载成功：{os.path.basename(self.model_path)}", None)
+
+            payload = {'session': None, 'labels': []}
+
+            # 标签文件顺手在本线程读掉，主线程就不用再做文件 IO
+            if self.label_path and os.path.isfile(self.label_path):
+                with open(self.label_path, 'r', encoding='utf-8') as f:
+                    payload['labels'] = [line.strip() for line in f
+                                         if line.strip()]
+
+            # 真正耗时的一段（建会话 + 图优化）。
+            # 本机实测 yolov8n.onnx 约 0.23 s；模型更大或机器更忙时会显著变长，
+            # 所以必须在子线程里做，绝不能留在主线程。
+            sess_options = ort.SessionOptions()
+            sess_options.graph_optimization_level = \
+                ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            sess_options.intra_op_num_threads = 4      # 用 4 核做推理
+            sess_options.inter_op_num_threads = 1
+            payload['session'] = ort.InferenceSession(
+                self.model_path, sess_options,
+                providers=['CPUExecutionProvider'])
+
+            self.init_finished.emit(
+                True,
+                f"模型加载成功：{os.path.basename(self.model_path)}"
+                f"（标签 {len(payload['labels'])} 个）",
+                payload,
+            )
         except Exception as e:
             self.init_finished.emit(False, f"模型加载失败：{str(e)}", None)
 
@@ -52,7 +77,23 @@ class YOLODetector(QObject):
         self.model_type=model_type
 
     def load_model(self, preloaded_model=None):
+        """加载模型。
+
+        ``preloaded_model`` 是 ``ModelInitThread`` 在子线程里备好的
+        ``{'session': InferenceSession, 'labels': [...]}``。
+        **传了就直接采用，不在本方法里重建会话** —— 因为本方法可能在主线程
+        被调用，重建会话（秒级）会把界面冻住。
+        """
         try:
+            if (isinstance(preloaded_model, dict)
+                    and preloaded_model.get('session') is not None):
+                self.session = preloaded_model['session']
+                self.labels = list(preloaded_model.get('labels') or [])
+                if not self.labels and os.path.isfile(self.label_path):
+                    with open(self.label_path, 'r', encoding='utf-8') as f:
+                        self.labels = [line.strip() for line in f if line.strip()]
+                return True
+
             import onnxruntime as ort
             sess_options=ort.SessionOptions()
             sess_options.graph_optimization_level=ort.GraphOptimizationLevel.ORT_ENABLE_ALL
