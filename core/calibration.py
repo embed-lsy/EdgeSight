@@ -120,7 +120,7 @@ class CameraCalibrator:
 
     使用流程::
 
-        cal = CameraCalibrator(pattern_size=(9, 6), square_size=0.025)
+        cal = CameraCalibrator(pattern_size=(9, 6), square_size=0.018)
         for frame in captures:
             ok = cal.add_frame(frame)      # 自动检测角点，返回是否成功
         intr = cal.calibrate()             # 求解内参
@@ -131,7 +131,7 @@ class CameraCalibrator:
     """
 
     def __init__(self, pattern_size: Tuple[int, int] = (9, 6),
-                 square_size: float = 0.025):
+                 square_size: float = 0.018):  # 18mm：与 EVALUATION.md 的 A4 打印图一致
         self.pattern_size = pattern_size      # 内角点数 (列, 行)
         self.square_size = square_size        # 方格边长，米
         self.object_points: list = []

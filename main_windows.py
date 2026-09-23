@@ -233,7 +233,11 @@ class MainWindow(QWidget, Ui_Form):
         if self._analysis_plot_inited and self.global_params.plot_enable:
             return
         self._analysis_plot_inited=True
-        for plt in [self.plot_sensor, self.plot_error, self.plot_control]:
+        # 绘图控件名以 ui/EdgeSightMain.ui 为准（plot_sensor/plot_error/plot_control
+        # 是旧版命名，命名修正后已不存在，引用会直接 AttributeError）
+        for plt in [self.plot_sensor_center, self.plot_sensor_shap,
+                    self.plot_target_distance, self.plot_sensor_conf,
+                    self.plot_sensor_fps]:
             plt.showGrid(x=True, y=True)
             plt.setLabel('bottom', '时间')
             plt.setLabel('left', '数值')
@@ -261,10 +265,15 @@ class MainWindow(QWidget, Ui_Form):
         self._plot_sensor_curve_fps.setData(list(self.time_history), list(self.sensor_history_fps))
         self._plot_target_distance.setData(list(self.time_history), list(self.target_distance))
         self._plot_sensor_curve_conf_thres.setData(list(self.time_history), list(self.sensor_history_conf_thres))
-        # 更新提示
-        if len(self.sensor_history_x) > 0:
-            last_x=self.sensor_history_x[-1]
-            last_y = self.sensor_history_y[-1]
+        # 更新提示（历史为空时直接返回，否则 last_x 未定义抛 UnboundLocalError，
+        # 分析定时器每 50ms 触发一次，会刷屏报错）
+        if len(self.sensor_history_x) == 0:
+            self.label_prompt.setText('暂无目标数据')
+            # 空状态下置信度状态不能沿用上一轮的"正常"，否则自相矛盾
+            self.label_conf.setText('—')
+            return
+        last_x = self.sensor_history_x[-1]
+        last_y = self.sensor_history_y[-1]
         warnings = []
         if last_x < 50:
             warnings.append("左侧丢失风险")
@@ -881,16 +890,22 @@ class MainWindow(QWidget, Ui_Form):
             self.global_params.base_width=0.0
             self.lcd_credibility.display(0)
         
-        # 几何测距：录制中必须算（数据轨要存），否则只在开启分析曲线时算。
-        # 这是刻意的解耦——测距的触发不该依赖"用户是否打开了绘图"。
-        need_range = self.global_params.plot_enable or self.recorder is not None
+        # 几何测距：**常开**。测距是门槛判据「UI 实时显示测距值」的核心输出，
+        # 不应依赖「是否启用深度分析」或「是否在录制」；
+        # 未标定 / 目标太小时 distance() 自己返回 None（明确不可测，不给猜测值）。
         dist = None
-        if need_range and self.global_params.detection_height > 0:
+        if self.global_params.detection_height > 0:
             dist = self.ranger.distance_from_box(
                 target if isinstance(target, dict) else {},
                 self.global_params.target_category,
             )
         self.global_params.distance = dist
+
+        # 实时距离读数（监视页「目标位置」分组，CHARTER 门槛判据）
+        if dist is not None:
+            self.label_distance_value.setText(f'{dist:.2f} m')
+        else:
+            self.label_distance_value.setText('不可测')
 
         if self.global_params.plot_enable:
             # 距离为 None 时曲线落 0（pyqtgraph 不画 None），但状态栏与录制

@@ -295,6 +295,24 @@ class Ui_Form(object):
 
         self.verticalLayout_5.addLayout(self.horizontalLayout_22)
 
+        self.horizontalLayout_distance = QHBoxLayout()
+        self.horizontalLayout_distance.setObjectName(u"horizontalLayout_distance")
+        self.label_distance_title = QLabel(self.groupBox_targetpos)
+        self.label_distance_title.setObjectName(u"label_distance_title")
+        self.label_distance_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.horizontalLayout_distance.addWidget(self.label_distance_title)
+
+        self.label_distance_value = QLabel(self.groupBox_targetpos)
+        self.label_distance_value.setObjectName(u"label_distance_value")
+        self.label_distance_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_distance_value.setStyleSheet(u"font-weight: bold; font-size: 14pt;")
+
+        self.horizontalLayout_distance.addWidget(self.label_distance_value)
+
+
+        self.verticalLayout_5.addLayout(self.horizontalLayout_distance)
+
 
         self.verticalLayout_4.addWidget(self.groupBox_targetpos)
 
@@ -873,7 +891,7 @@ class Ui_Form(object):
         self.spin_square_mm.setDecimals(1)
         self.spin_square_mm.setMinimum(1.000000000000000)
         self.spin_square_mm.setMaximum(500.000000000000000)
-        self.spin_square_mm.setValue(25.000000000000000)
+        self.spin_square_mm.setValue(18.000000000000000)
 
         self.horizontalLayout_32.addWidget(self.spin_square_mm)
 
@@ -1057,6 +1075,8 @@ class Ui_Form(object):
         self.label_17.setText(QCoreApplication.translate("Form", u"\u68c0\u6d4b\u7f6e\u53ef\u4fe1\u5ea6\uff1a", None))
         self.label_19.setText(QCoreApplication.translate("Form", u"\u76ee\u6807\u7c7b\u522b\uff1a", None))
         self.label_target_category.setText(QCoreApplication.translate("Form", u"--", None))
+        self.label_distance_title.setText(QCoreApplication.translate("Form", u"\u76ee\u6807\u8ddd\u79bb\uff1a", None))
+        self.label_distance_value.setText(QCoreApplication.translate("Form", u"\u4e0d\u53ef\u6d4b", None))
         self.groupBox_10.setTitle(QCoreApplication.translate("Form", u"\u6a21\u578b\u53c2\u6570\u5b9e\u65f6\u5fae\u8c03", None))
         self.label_23.setText(QCoreApplication.translate("Form", u" \u7f6e\u4fe1\u5ea6\u9608\u503c\uff1a", None))
         self.label_confidence_thres.setText(QCoreApplication.translate("Form", u"0.50", None))

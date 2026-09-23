@@ -335,6 +335,33 @@ QLineEdit, QTextEdit {
                     </item>
                    </layout>
                   </item>
+                  <item>
+                   <layout class="QHBoxLayout" name="horizontalLayout_distance">
+                    <item>
+                     <widget class="QLabel" name="label_distance_title">
+                      <property name="text">
+                       <string>目标距离：</string>
+                      </property>
+                      <property name="alignment">
+                       <set>Qt::AlignmentFlag::AlignCenter</set>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QLabel" name="label_distance_value">
+                      <property name="text">
+                       <string>不可测</string>
+                      </property>
+                      <property name="alignment">
+                       <set>Qt::AlignmentFlag::AlignCenter</set>
+                      </property>
+                      <property name="styleSheet">
+                       <string notr="true">font-weight: bold; font-size: 14pt;</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </item>
                  </layout>
                 </widget>
                </item>
@@ -1128,7 +1155,7 @@ QLineEdit, QTextEdit {
                    <double>500.000000000000000</double>
                   </property>
                   <property name="value">
-                   <double>25.000000000000000</double>
+                   <double>18.000000000000000</double>
                   </property>
                  </widget>
                 </item>
