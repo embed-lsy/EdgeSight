@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EdgeSight 实景验证操作指引</title>
+<style>
+  :root {
+    --ink: #1f2328;
+    --sub: #57606a;
+    --line: #d0d7de;
+    --bg: #ffffff;
+    --panel: #f6f8fa;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --bad: #cf222e;
+    --accent: #0969da;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    color: var(--ink); background: var(--bg);
+    max-width: 860px; margin: 0 auto; padding: 32px 40px 80px;
+    line-height: 1.75; font-size: 15px;
+  }
+  h1 { font-size: 26px; border-bottom: 2px solid var(--line); padding-bottom: 12px; }
+  h2 { font-size: 20px; margin-top: 40px; padding-left: 10px; border-left: 4px solid var(--accent); }
+  h3 { font-size: 16px; margin-top: 24px; }
+  .meta { color: var(--sub); font-size: 13px; }
+  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; margin: 14px 0; }
+  .ok-box { border-left: 4px solid var(--ok); }
+  .warn-box { border-left: 4px solid var(--warn); }
+  .bad-box { border-left: 4px solid var(--bad); }
+  ol li, ul li { margin: 6px 0; }
+  .kbd {
+    background: var(--panel); border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 7px; font-size: 13px; font-family: Consolas, monospace;
+    white-space: nowrap;
+  }
+  .file { font-family: Consolas, monospace; background: var(--panel); padding: 1px 6px; border-radius: 4px; font-size: 13.5px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; }
+  th { background: var(--panel); }
+  .num { font-family: Consolas, monospace; }
+  .fill { color: var(--accent); font-weight: bold; }
+  code { background: var(--panel); padding: 1px 5px; border-radius: 4px; font-size: 13.5px; }
+  @media print { body { padding: 0; font-size: 12px; } h2 { margin-top: 24px; } }
+</style>
+</head>
+<body>
+
+<h1>EdgeSight 实景验证操作指引</h1>
+<p class="meta">对应 CHARTER 门槛判据：卷尺三点测距（2m / 5m / 10m）+ 录制回放 · 只需要一张 A4 纸、一把卷尺、一个人</p>
+<div class="box warn-box">
+  <strong>这份文件与仓库里的 <span class="file">EVALUATION.md</span> 是配套的一对</strong>：
+  EVALUATION.md 写“怎么量、合格线多少”，本文写“一步步照着做”。
+  <strong>两份必须同步改</strong>——界面、默认值、操作步骤有变动时一起更新；
+  只改一份，现场就会照着一份过期的指引白跑一趟。
+</div>
+
+<h2>0 · 要准备的东西</h2>
+<div class="box">
+  <ul>
+    <li><strong>打印机和一张 A4 纸</strong> —— 打印棋盘图 <span class="file">chessboard_A4_9x6_18mm.png</span>（就在本文件夹里）</li>
+    <li><strong>一把卷尺</strong>（量 2 / 5 / 10 米用；没有卷尺，量好了的地砖也可以，告诉我你用什么量的）</li>
+    <li><strong>一个站着不动的人</strong> —— 最好是 1.70 米左右；不是的话把实际身高记下来</li>
+    <li><strong>USB 摄像头接在电脑上</strong>（软件启动会自动打开它）</li>
+  </ul>
+</div>
+
+<h2>1 · 打印棋盘格（约 5 分钟）</h2>
+<ol>
+  <li>打印 <span class="file">chessboard_A4_9x6_18mm.png</span>。打印对话框里缩放必须选 <strong>「实际大小 / 100%」</strong>，<strong>绝不能选「适应页面」</strong>。</li>
+  <li>打印完，用尺子量图上那条<strong>「打印校验尺」</strong>（标着 0 到 100 的线）：
+    <div class="box ok-box">
+      量出来 <strong>正好 100 mm</strong> → 比例正确，方格就是 18 mm，直接进第二步。<br>
+      量出来 <strong>不是 100 mm</strong>（比如 96 mm）→ 记下实测量。实际方格边长 = 18 × 实测量 ÷ 100。<br>
+      例：量到 96 mm → 方格 = 18 × 96 ÷ 100 = <strong>17.28 mm</strong>，这个数待会要填进软件。
+    </div>
+  </li>
+  <li>把纸<strong>贴在硬纸板或纸盒上压平</strong>。纸软了、卷了、有褶皱，标定精度都会掉。</li>
+</ol>
+
+<h2>2 · 相机标定（约 10 分钟）</h2>
+<ol>
+  <li>启动软件（运行仓库里的 <span class="file">main_windows.py</span>），摄像头自动打开，「监视」页有画面。</li>
+  <li>切到 <strong>「设置」页</strong>：
+    <ul>
+      <li>棋盘格内角点：保持 <span class="kbd">9 × 6</span>（默认就是，不用动）</li>
+      <li>方格边长：<span class="kbd">18.0</span>（程序默认已是 18；如果校验尺不是 100 mm，改成你算出的实际值）</li>
+    </ul>
+  </li>
+  <li>点 <span class="kbd">采集一帧</span> 按钮 —— 按钮会变成「停止采集」。<br>
+    <span class="meta">注：按钮名叫"采集一帧"，实际是"开始连续采集"，点一次就行。</span></li>
+  <li>拿起棋盘格面对摄像头，慢慢变换位置和角度，让棋盘：
+    <ul>
+      <li>出现在画面的<strong>各个角落</strong>（左上、右下都要有）</li>
+      <li>有正对的，也有<strong>左右倾、上下倾</strong>的（大概 15°～40° 就行，不用太斜）</li>
+      <li>全程<strong>完整入画</strong>（9×6 = 54 个角点一个都不能出画面）</li>
+    </ul>
+  </li>
+  <li>盯着「标定状态」旁边那行字：<br>
+    显示 <span class="kbd">已采集 X 帧（当前帧检测到棋盘格 ✓）</span> → 正常，继续换姿势；<br>
+    显示 <span class="kbd">当前帧未检测到棋盘格</span> → 说明这一帧没采上，换个角度或挪近一点。<br>
+    <strong>总数采到 15 帧以上</strong>就可以停（至少 10 帧）。</li>
+  <li>再点一次 <span class="kbd">停止采集</span>，然后点 <span class="kbd">求解并保存</span>。</li>
+  <li>弹窗出来后<strong>把弹窗里的数字记下来</strong>：
+    <div class="box ok-box">
+      要记：<strong>fx、fy、重投影误差</strong> 这三个数。<br>
+      质量判断：重投影误差 <strong>&lt;0.5 优</strong>｜<strong>&lt;1.0 可接受</strong>｜≥1.0 建议重新采集再算一次。
+    </div>
+  </li>
+</ol>
+
+<h2>3 · 卷尺三点测距（核心验收，约 10 分钟）</h2>
+<p>这一步就是 CHARTER 写死的验收标准，做的时候不用紧张，按下面来就行：</p>
+<ol>
+  <li>找一段空地，用卷尺量出 <strong>2 米、5 米、10 米</strong> 三个位置，地上放个显眼的东西做标记（鞋、纸片都行）。</li>
+  <li>让那个人站在 <strong>2 米</strong> 标记处，面向摄像头<strong>站直</strong>。</li>
+  <li>回到「监视」页。目标被框住后，绿框上方会显示类似 <span class="kbd">person 0.85 1.98m</span>；「目标位置」分组里的<strong>「目标距离」</strong>也会显示同一个数 —— 最后那个数就是软件算的距离（显示「不可测」= 这帧不算，别硬记）。</li>
+  <li>等数字<strong>稳定不闪了</strong>，记下来。然后在 5 米、10 米重复。</li>
+</ol>
+<table>
+  <tr><th>实际距离</th><th>合格范围（CHARTER 标准）</th><th>软件显示值</th></tr>
+  <tr><td>2 m</td><td>1.70 ~ 2.30 m（误差 ≤15%）</td><td class="fill">____ m</td></tr>
+  <tr><td>5 m</td><td>4.25 ~ 5.75 m（误差 ≤15%）</td><td class="fill">____ m</td></tr>
+  <tr><td>10 m</td><td>8.00 ~ 12.00 m（误差 ≤20%）</td><td class="fill">____ m</td></tr>
+</table>
+<div class="box warn-box">
+  <strong>注意</strong>：软件按「人身高 1.70 米」算的距离。如果被测的人不是 1.70 米，距离会按比例偏（比如人只有 1.60 米，所有读数都会偏大约 6%）。
+  遇到这种情况不用重测，把<strong>实际身高</strong>告诉我，我来修正换算。
+</div>
+
+<h2>4 · 录一段真实视频（约 5 分钟）</h2>
+<ol>
+  <li>切到 <strong>「录制回放」页</strong>，点 <span class="kbd">开始录制</span>。</li>
+  <li>让那个人<strong>从 3 米处走到 10 米处，再走回来</strong>（录 30~60 秒）。中途可以在 5 米附近停一停。</li>
+  <li>点 <span class="kbd">停止录制</span>，弹窗里显示<strong>时长、视频帧数、数据轨条数、丢帧数</strong> —— 记下来（丢帧应该是 0，不是 0 也告诉我）。</li>
+  <li>点 <span class="kbd">选择录制</span> → 选中刚生成的会话 → 点 <span class="kbd">播放</span>：
+    <ul>
+      <li>视频能正常播？</li>
+      <li>下面的<strong>测距曲线</strong>有没有跟着人的走远/走近起伏？（走近距离变小、走远变大）</li>
+    </ul>
+  </li>
+</ol>
+
+<h2>5 · 你要发给我的信息（照着抄就行）</h2>
+<div class="box">
+<ol>
+  <li>校验尺实测量：______ mm（如果不是正好 100）＋你换算的方格边长：______ mm</li>
+  <li>标定弹窗：fx = ______　fy = ______　重投影误差 = ______ px</li>
+  <li>三个距离读数：2m 处显示 ______ m　5m 处显示 ______ m　10m 处显示 ______ m</li>
+  <li>被测人的实际身高：______ m</li>
+  <li>录制弹窗：时长 ______ s　视频 ______ 帧　数据轨 ______ 条　丢帧 ______</li>
+  <li>回放正常吗：视频 □能 □不能　测距曲线 □有起伏 □平的 □没有曲线</li>
+  <li>中间弹过任何报错吗：□没有 □有（把文字抄给我或截图）</li>
+</ol>
+</div>
+
+<h2>6 · 常见问题</h2>
+<table>
+  <tr><th>现象</th><th>多半是</th><th>怎么办</th></tr>
+  <tr><td>一直显示"未检测到棋盘格"</td><td>棋盘没完整入画 / 太斜 / 光线太暗 / 纸反光</td><td>挪远一点让棋盘全部入画，倾斜别超过 45°，别让灯直射纸面</td></tr>
+  <tr><td>目标框都没有</td><td>检测没跑起来或目标太小</td><td>确认「监视」页有画面、类别选了 person；人远时 detection_height 会小于最小像素限制，属正常，走近些</td></tr>
+  <tr><td>有框但没距离数字</td><td>没标定成功</td><td>看设置页标定状态是不是"已标定"；不是就回到第二步重做（「目标距离」会显示"不可测"）</td></tr>
+  <tr><td>距离明显不对（差好几倍）</td><td>方格边长和实际打印不符（程序默认 18mm，配套图也是 18mm；换用了别的棋盘图就要改）</td><td>读数和真实值差距是固定比例的话，改对「方格边长」就能修好，不用重标</td></tr>
+  <tr><td>求解时弹"标定失败"</td><td>有效帧太少或姿态太单一</td><td>重新采集，多换几个位置和角度</td></tr>
+</table>
+
+<h2>7 · 做完以后</h2>
+<p>把第 5 节那 7 条信息发我。我来判断：标定质量够不够、三点测距过没过 CHARTER 门槛、录制回放有没有问题。都过了，这一期的实地验收就闭环了，剩下的就是把代码合回主线的事。</p>
+
+</body>
+</html>
