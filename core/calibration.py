@@ -37,6 +37,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass, asdict, field
 from typing import Optional, Tuple
@@ -91,7 +92,20 @@ class RangingConfig:
     })
     default_height: float = 1.50   # 类别未登记时的兜底高度
     pitch_deg: float = 0.0         # 相机俯仰角，向下为正，单位度
+    camera_height: float = 0.0     # 相机安装高度（米），卷尺量。0 = 未测量，接触点法不可用
     min_pixel_height: int = 8      # 像素高度低于此值时不测距（噪声不可信）
+    # 框宽高比先验 (下限, 上限)，用于判断「框底边是否真的是脚」。
+    # 只登记宽高比稳定的类别：站立的人约 0.30~0.45，而只有脸入画时接近 1.0，
+    # 据此能识别「框不是全身」。car / bus 的宽高比随视角变化极大
+    # （正面 1.5+、侧面 3+），套用会误判，故不登记。
+    aspect_limits: dict = field(default_factory=lambda: {'person': (0.15, 0.75)})
+    # 「反解判据」的容差：反解出的身高允许偏离登记身高的比例。
+    # 这是判定「框底边到底是不是脚」的**主力判据**（见 estimate_target_height）；
+    # 上表的 aspect_limits 因实测判别力为零，已降级为兜底。
+    # 0.35 的依据：person 登记 1.70 -> 允许 [1.11, 2.30]，
+    # 既能容纳 1.4 m 的矮个子与 2.0 m 的高个子，又能拦住实测中
+    # 「被挡到腰 3.88 m」「只有下巴 3.58 m」这类不完整框。
+    height_tolerance: float = 0.35
 
     def height_for(self, class_name: str) -> float:
         return self.object_heights.get(class_name, self.default_height)
@@ -107,6 +121,8 @@ class RangingConfig:
             object_heights=dict(getattr(params, 'object_heights', {}) or {}),
             default_height=float(getattr(params, 'default_object_height', 1.50)),
             pitch_deg=float(getattr(params, 'pitch_deg', 0.0)),
+            camera_height=float(getattr(params, 'camera_height', 0.0)),
+            height_tolerance=float(getattr(params, 'height_tolerance', 0.35)),
             min_pixel_height=int(getattr(params, 'min_pixel_height', 8)),
         )
 
@@ -164,7 +180,7 @@ class CameraCalibrator:
 
     使用流程::
 
-        cal = CameraCalibrator(pattern_size=(9, 6), square_size=0.018)
+        cal = CameraCalibrator(pattern_size=(9, 6), square_size=0.0171)
         for frame in captures:
             ok = cal.add_frame(frame)      # 自动检测角点，返回是否成功
         intr = cal.calibrate()             # 求解内参
@@ -175,7 +191,8 @@ class CameraCalibrator:
     """
 
     def __init__(self, pattern_size: Tuple[int, int] = (9, 6),
-                 square_size: float = 0.018):  # 18mm：与 EVALUATION.md 的 A4 打印图一致
+                 square_size: float = 0.0171):  # 17.1mm：本机打印机 100% 打印后的实测方格
+                                                 # （配套棋盘图按 18mm 设计，打印会被缩放 → 以校验尺实量为准）
         self.pattern_size = pattern_size      # 内角点数 (列, 行)
         self.square_size = square_size        # 方格边长，米
         self.object_points: list = []
@@ -264,6 +281,459 @@ class CameraCalibrator:
 
 
 # ---------------------------------------------------------------------------
+# 安装参数自标定（外参：相机安装高度 + 俯仰角）
+# ---------------------------------------------------------------------------
+#
+# 为什么需要它
+# ------------
+# 接触点法 ``Z = H_相机 / tan(俯仰角 + atan((v_底 - cy)/fy))`` 里有两个**必须
+# 事先知道**的量：相机装多高、相机朝下多少度。上一版要求用卷尺 + 量角器手工量，
+# 于是出现两个问题：
+#
+#   1. 卷尺量高度麻烦，量角器量俯仰角更麻烦，而且俯仰角**精度极敏感** ——
+#      10 m 处每 1° 的俯仰角偏差约带来 ``0.0175 × Z / H`` 的距离误差
+#      （H=0.7 m 时就是 25%/1°）。
+#   2. 手工量的角度不可复核，装完不知道对不对。
+#
+# 反过来想：把目标摆到**卷尺已知的距离 Z** 上、读出它的**框底边像素 v**，
+# 这两个量就把 (H, 俯仰角) 约束住了 —— 因为底边贴地时有
+#
+#     v = cy + fy · tan(atan(H/Z) − 俯仰角)
+#
+# 一个已知距离给一个方程、两个未知数，所以**两个已知距离就能同时解出 H 与
+# 俯仰角**，三个以上做最小二乘。整个过程不需要量角器，也不需要把相机装到
+# 某个特定高度 —— 装多高都能解出来。这正好消掉上面两个问题。
+
+MOUNT_MIN_POINTS = 2          # 两个未知数 -> 至少两个已知距离
+MOUNT_MIN_DIST_SPAN = 1.5     # 最远/最近已知距离的比值下限：低于此值解算病态
+MOUNT_RESIDUAL_MAX_PX = 5.0   # 拟合残差上限：超过说明采样点本身不自洽
+MOUNT_PITCH_RANGE_DEG = (-40.0, 75.0)   # 俯仰角搜索范围（向下为正）
+# 相机安装高度的物理合理范围（车/机器人/桌面支架）。它不是「精度余量」，
+# 而是**排除多解**用的：两点标定时方程组是二次的，存在**两个数学上同样成立**
+# 的解 —— 实测真值 (0.70 m, 2°) 会同时解出 (28.6 m, 68.7°)，两组都能让两个
+# 采样点严格吻合。超出此上限的解按「不可信」剔除，两点才可能唯一。
+MOUNT_HEIGHT_RANGE_M = (0.05, 5.0)
+# 次优解与最优解的残差之差小于此值 -> 认为两个解同样吻合 -> 拒答（歧义）
+MOUNT_AMBIGUITY_PX = 0.5
+
+
+@dataclass
+class MountSolution:
+    """安装参数自标定的结果 —— 含「凭什么信这个数」。"""
+
+    ok: bool = False
+    camera_height: float = 0.0     # 米
+    pitch_deg: float = 0.0         # 度，向下为正（与设置页同向）
+    residual_px: float = 0.0       # 各采样点「预测底边像素 - 实测底边像素」的均方根
+    n_points: int = 0
+    dist_span: float = 0.0         # 最远/最近已知距离之比，越大越可信
+    sigma_height: float = 0.0      # 相机高度的标准差（米），由假设的像素噪声传播
+    sigma_pitch: float = 0.0       # 俯仰角的标准差（度）
+    reason: str = ''               # ok=False 时：为什么不能用
+    detail: str = ''               # ok=True 时：给用户看的结论
+
+
+def solve_mount_params(marks, intrinsics,
+                       sigma_px: float = 1.0) -> MountSolution:
+    """由「已知距离 + 框底边像素」反解 (相机安装高度, 俯仰角)。**纯函数**。
+
+    ``marks``：``[(已知距离_m, 框底边像素_v), ...]``，至少 2 组，**推荐 3 组**。
+
+    做法（先粗搜枚举全部候选解、再逐个 Gauss-Newton 精修，全程只依赖 numpy、
+    无随机性）：
+
+    1. 粗搜俯仰角网格，对每个角度取「使预测像素残差最小」的高度作种子；
+    2. 保留**所有候选**（不只最优）—— 两点标定时方程组是二次的，数学上存在
+       两个解。实测真值 (0.70 m, 2°) 会同时解出 (28.6 m, 68.7°)，两组都让
+       两个采样点严格吻合。只留最优解会在像素噪声下随机跳到错误那一支
+       （实测真值 1.2 m/20° 时会解成 8.7 m ± 7.7 m）；
+    3. 按物理合理范围 ``MOUNT_HEIGHT_RANGE_M`` 剔除不可信解，再对剩下的解做
+       **歧义裁决**：若两个解同样吻合，拒答并要求补点；
+    4. 误差函数取**像素域**残差 ``Σ(v_pred − v_实测)²``，因为 v 才是被测量的量；
+    5. 由最终 Jacobian 传播像素噪声，给出 (H, 俯仰角) 的标准差 —— 这样
+       UI 能直接告诉用户「用这两个距离解，精度大致是多少」。
+
+    拒绝给出结果的情形（``ok=False``）：内参无效、采样点少于 2 组、
+    两组距离太接近（解算病态）、存在两个同样吻合的解（歧义）、
+    拟合残差过大（采样点本身不自洽，例如标记时框底边并不在地面上）。
+
+    ⚠️ **一致性检查需要 3 个点**：2 个点永远能严格拟合（方程数 = 未知数），
+    所以「残差」在两点时恒为 0，暴露不了「把膝盖当脚标了」这类错误。
+    这是数学上的限制，不是实现取舍 —— 所以操作上推荐 2 m / 5 m / 10 m 三点。
+
+    实测（``E:\\WorkBuddy-Work\\scripts\\verify_mount_selfcal.py``）：
+    由真值正算采样点再反解，多点组合均精确复原（残差 ~1e-14 px）；
+    1 px 像素噪声下 200 次 Monte Carlo 无偏、散布与自报 σ 同量级。
+    """
+    if intrinsics is None or not intrinsics.is_valid():
+        return MountSolution(ok=False, reason='相机未标定，无法自标定安装参数')
+    cy = float(intrinsics.cy)
+    fy = float(intrinsics.fy)
+    if fy <= 0:
+        return MountSolution(ok=False, reason='内参 fy 非法')
+
+    pts = []
+    for m in marks or []:
+        try:
+            z, v = float(m[0]), float(m[1])
+        except (TypeError, IndexError, ValueError):
+            continue
+        if z > 0 and np.isfinite(v):
+            pts.append((z, v))
+    if len(pts) < MOUNT_MIN_POINTS:
+        return MountSolution(ok=False, n_points=len(pts),
+                             reason=f'至少需要 {MOUNT_MIN_POINTS} 个已知距离'
+                                    f'（当前 {len(pts)} 个）')
+
+    zs = np.array([p[0] for p in pts], dtype=float)
+    vs = np.array([p[1] for p in pts], dtype=float)
+    span = float(zs.max() / zs.min())
+    if span < MOUNT_MIN_DIST_SPAN:
+        return MountSolution(ok=False, n_points=len(pts), dist_span=span,
+                             reason=(f'已知距离太接近（最远/最近 = {span:.2f}，'
+                                     f'需要 ≥ {MOUNT_MIN_DIST_SPAN:.1f}）：'
+                                     f'这样解不出唯一的高度与俯仰角'))
+    # 观测角 beta_i = atan((v_i - cy)/fy)，即「该底边相对光轴偏了多少」
+    betas = np.arctan2(vs - cy, fy)
+
+    def predict(H, theta_rad):
+        """给定 (H, 俯仰角)，预测各采样点的底边像素。"""
+        return cy + fy * np.tan(np.arctan2(H, zs) - theta_rad)
+
+    def residual(H, theta_rad):
+        return predict(H, theta_rad) - vs
+
+    # ---- 1. 粗搜：俯仰角网格，每个角度取「使预测残差最小」的高度作种子 ----
+    # 注意要**保留全部候选**（不只最优那个）：两点标定存在两个数学解，
+    # 只取全场最优会在噪声下随机跳到错误的那一支（实测过：真值 1.2 m/20°
+    # 时解成 8.7 m ± 7.7 m）。所以先枚举所有局部极小，逐个精修，再按物理
+    # 范围筛选、按歧义检查裁决。
+    lo_d, hi_d = MOUNT_PITCH_RANGE_DEG
+    min_alpha = np.deg2rad(MIN_CONTACT_ANGLE_DEG)
+    max_alpha = np.deg2rad(89.0)
+    ths = np.arange(lo_d, hi_d + 1e-9, 0.25)
+    h0s = np.full(ths.shape, np.nan)
+    costs = np.full(ths.shape, np.inf)
+    for i, th_deg in enumerate(ths):
+        th = np.deg2rad(th_deg)
+        alpha = th + betas                  # 各点的视线俯角
+        if np.any(alpha <= min_alpha) or np.any(alpha >= max_alpha):
+            continue
+        h0 = float(np.mean(zs * np.tan(alpha)))   # 由 H = Z·tan(α) 直接给初值
+        if not (1e-3 < h0 < 1e4):
+            continue
+        h0s[i] = h0
+        costs[i] = float(np.sum(residual(h0, th) ** 2))
+
+    seeds = [i for i in range(1, len(ths) - 1)
+             if np.isfinite(costs[i]) and np.isfinite(costs[i - 1])
+             and np.isfinite(costs[i + 1])
+             and costs[i] <= costs[i - 1] and costs[i] <= costs[i + 1]]
+    if np.any(np.isfinite(costs)):
+        seeds.append(int(np.argmin(costs)))
+    seeds = sorted(set(seeds))
+
+    # ---- 2. 精修：Gauss-Newton（数值 Jacobian，2 个未知数，收敛极快） ----
+    def refine(H0, th0):
+        H, th = float(H0), float(th0)
+        for _ in range(80):
+            r = residual(H, th)
+            eps_h, eps_t = max(H * 1e-6, 1e-9), 1e-7
+            j_h = (residual(H + eps_h, th) - r) / eps_h
+            j_t = (residual(H, th + eps_t) - r) / eps_t
+            J = np.column_stack([j_h, j_t])
+            try:
+                delta, *_ = np.linalg.lstsq(J, -r, rcond=None)
+            except np.linalg.LinAlgError:
+                break
+            step_h, step_t = float(delta[0]), float(delta[1])
+            # 限步长，防止从远处一步跨过极值点
+            if abs(step_h) > 1.0:
+                step_h = math.copysign(1.0, step_h)
+            if abs(step_t) > 0.1:
+                step_t = math.copysign(0.1, step_t)
+            H += step_h
+            th += step_t
+            if H <= 0:
+                H = 1e-3
+            if abs(step_h) < 1e-10 and abs(step_t) < 1e-13:
+                break
+        return H, th
+
+    h_lo, h_hi = MOUNT_HEIGHT_RANGE_M
+    found = []           # (rms, H, th, th_deg)
+    for i in seeds:
+        if not np.isfinite(h0s[i]):
+            continue
+        H, th = refine(h0s[i], np.deg2rad(float(ths[i])))
+        th_deg = float(np.rad2deg(th))
+        if not (h_lo <= H <= h_hi) or not (lo_d <= th_deg <= hi_d):
+            continue
+        alpha = th + betas
+        if np.any(alpha <= min_alpha) or np.any(alpha >= max_alpha):
+            continue
+        r = residual(H, th)
+        found.append((float(np.sqrt(np.mean(r ** 2))), H, th, th_deg))
+
+    # 去重（同一个解的多个种子）
+    uniq = []
+    for cand in sorted(found, key=lambda s: s[0]):
+        if all(abs(cand[1] - u[1]) > 0.01 or abs(cand[3] - u[3]) > 0.1
+               for u in uniq):
+            uniq.append(cand)
+
+    if not uniq:
+        return MountSolution(
+            ok=False, n_points=len(pts), dist_span=span,
+            reason=(f'解不出物理合理的安装参数（相机高度需在 '
+                    f'{h_lo:.2f}~{h_hi:.2f} m，俯仰角需在 '
+                    f'{lo_d:.0f}~{hi_d:.0f}°）：请检查「已知距离」是否填对、'
+                    f'标记时目标是否真的站在该距离处'))
+
+    rms, H, th, th_deg = uniq[0]
+
+    # ---- 3. 歧义裁决：两个解同样吻合时不给结论（宁可拒答） ----
+    for rms2, H2, th2, th2_deg in uniq[1:]:
+        if rms2 <= rms + MOUNT_AMBIGUITY_PX and rms2 <= 1.0:
+            return MountSolution(
+                ok=False, camera_height=H, pitch_deg=th_deg, residual_px=rms,
+                n_points=len(pts), dist_span=span,
+                reason=(f'这组已知距离有**两个同样吻合**的解'
+                        f'（{H:.2f} m / {th_deg:.1f}° 与 '
+                        f'{H2:.2f} m / {th2_deg:.1f}°），无法唯一确定。'
+                        f'请再补一个已知距离 —— 推荐摆 2 m / 5 m / 10 m 三点'))
+
+    r = residual(H, th)
+
+    # ---- 4. 不确定度：由 Jacobian 把像素噪声传到 (H, 俯仰角) ----
+    # σ² 取「假设像素噪声」与「实际残差」的较大者：只有 2 个点时残差必然为 0，
+    # 那时只能按假设噪声给量级，不能假装精度无穷高。
+    eps_h, eps_t = max(H * 1e-6, 1e-9), 1e-7
+    j_h = (residual(H + eps_h, th) - r) / eps_h
+    j_t = (residual(H, th + eps_t) - r) / eps_t
+    J = np.column_stack([j_h, j_t])
+    dof = max(len(pts) - 2, 1)
+    sigma2 = max(float(np.sum(r ** 2)) / dof, float(sigma_px) ** 2)
+    try:
+        cov = sigma2 * np.linalg.inv(J.T @ J)
+        sig_h = float(np.sqrt(max(cov[0, 0], 0.0)))
+        sig_t = float(np.rad2deg(np.sqrt(max(cov[1, 1], 0.0))))
+    except np.linalg.LinAlgError:
+        sig_h, sig_t = float('nan'), float('nan')
+
+    if rms > MOUNT_RESIDUAL_MAX_PX:
+        return MountSolution(
+            ok=False, camera_height=H, pitch_deg=th_deg, residual_px=rms,
+            n_points=len(pts), dist_span=span, sigma_height=sig_h,
+            sigma_pitch=sig_t,
+            reason=(f'拟合残差 {rms:.1f} px 过大（上限 '
+                    f'{MOUNT_RESIDUAL_MAX_PX:.0f} px）：这组采样点自身不自洽 —— '
+                    f'常见原因是标记时框底边并不在地面上（目标被遮挡、'
+                    f'只露出上半身），或「已知距离」填错。请重新采样'))
+
+    detail = (f'已解出：相机安装高度 {H:.3f} m、俯仰角 {th_deg:.2f}°，'
+              f'残差 {rms:.2f} px（{len(pts)} 个采样点，'
+              f'最远/最近 = {span:.2f}）')
+    if len(pts) == MOUNT_MIN_POINTS:
+        detail += '。两点只能保证与这两个距离吻合，建议再补一个已知距离复核'
+    return MountSolution(ok=True, camera_height=H, pitch_deg=th_deg,
+                         residual_px=rms, n_points=len(pts), dist_span=span,
+                         sigma_height=sig_h, sigma_pitch=sig_t, detail=detail)
+
+
+# ---------------------------------------------------------------------------
+# 可见性体检 —— 出数字之前的检查（不检查就出数 = 在零证据下自信地给错值）
+# ---------------------------------------------------------------------------
+
+EDGE_TOL_PX = 2.0             # 框边距画面边界多少像素内算「贴边」
+MIN_CONTACT_ANGLE_DEG = 1.0   # 接触点法的最小俯角：低于此值地面交点趋近无穷远
+MUTUAL_CHECK_RATIO = 0.30     # 双源互检：两法差异超过此比例即标「存疑」
+
+
+@dataclass
+class VisibilityReport:
+    """一次检测框的可见性体检结果。
+
+    为什么必须有这一步
+    ------------------
+    检测框是**可见部分的最小包围盒**，不是物体的完整轮廓 —— 目标只要露出一
+    部分就会被框出来。``core/detector/postprocess.py`` 用 ``np.clip`` / ``min``
+    把框压在画面内，所以**被画面裁掉的目标，其框边必然贴在画面边界上**。
+
+    而两条测距法都隐含「框是完整的」这个前提：
+
+    * 高度法   ``Z = fy * H_目标 / 框高`` —— 要求框高 == 目标全身的像素高
+    * 接触点法 ``Z = H_相机 / tan(俯角)`` —— 要求框底边 == 目标与地面的接触点
+
+    框不完整时两法都会给出**自信的错值**。实测（``E:\\WorkBuddy-Work\\scripts\\
+    verify_box_truncation.py``）：只有脸入画时，真实 0.40 m 被算成 2.96 m，
+    误差 +639%，而且没有任何报错。所以顺序必须是「先体检、再决定出不出数」。
+    """
+
+    touches_top: bool = False      # 框上边贴画面顶边 -> 头顶被裁
+    touches_bottom: bool = False   # 框下边贴画面底边 -> 脚/底部被裁
+    touches_left: bool = False
+    touches_right: bool = False
+    aspect: float = 0.0            # 框宽 / 框高
+    checked: bool = False          # 是否真的做了体检（不知道画面尺寸时为 False）
+
+    @property
+    def height_method_ok(self) -> bool:
+        """高度法用整个框高，所以上下边都不能被裁。"""
+        if not self.checked:
+            return True
+        return not (self.touches_top or self.touches_bottom)
+
+    @property
+    def ground_contact_ok(self) -> bool:
+        """接触点法只要求**脚**可见 —— 头顶被裁不影响，这是它的相对优势。"""
+        if not self.checked:
+            return True
+        return not self.touches_bottom
+
+    def edge_text(self) -> str:
+        names = []
+        if self.touches_top:
+            names.append('上')
+        if self.touches_bottom:
+            names.append('下')
+        if self.touches_left:
+            names.append('左')
+        if self.touches_right:
+            names.append('右')
+        return ''.join(names)
+
+
+def compute_box_visibility(box: dict, image_size,
+                           tol: float = EDGE_TOL_PX) -> VisibilityReport:
+    """由检测框 + 画面尺寸判定「框的哪条边被画面裁掉」。**纯函数**。
+
+    ``box`` 用 ``YOLODetector`` 的字段（``x``/``y`` 是中心，``width``/``height``
+    是尺寸），与 ``distance_from_box`` 保持一致。
+    """
+    if not image_size or len(image_size) < 2:
+        return VisibilityReport()
+    img_w, img_h = float(image_size[0]), float(image_size[1])
+    if img_w <= 0 or img_h <= 0:
+        return VisibilityReport()
+
+    cx = float(box.get('x', 0.0))
+    cy = float(box.get('y', 0.0))
+    w = float(box.get('width', 0.0))
+    h = float(box.get('height', 0.0))
+
+    x1, y1 = cx - w / 2.0, cy - h / 2.0
+    x2, y2 = cx + w / 2.0, cy + h / 2.0
+
+    return VisibilityReport(
+        touches_top=y1 <= tol,
+        touches_bottom=y2 >= img_h - tol,
+        touches_left=x1 <= tol,
+        touches_right=x2 >= img_w - tol,
+        aspect=(w / h) if h > 0 else 0.0,
+        checked=True,
+    )
+
+
+def distance_from_ground_contact(v_bottom: float, intrinsics,
+                                 camera_height: float,
+                                 pitch_deg: float = 0.0) -> Optional[float]:
+    """地面接触点法（CHARTER「范围内的」第 2 条 ②）。**纯函数**。
+
+    ``Z = H_相机 / tan(俯仰角 + atan((v_底 - cy) / fy))``
+
+    两个关键性质：
+
+    1. **不需要目标高度** —— 所以对未登记类别（椅子、小狗……）同样有效，
+       这正好回答「不可能一直按人的标准算」。
+    2. **不需要任何「地面识别」** —— 代码里没有地面分割、没有平面拟合、
+       没有地平面检测。只有一条假设：*框底边中点落在地面上*。
+       ``H_相机`` 由卷尺量得，与目标有多高、画面里有没有地面纹理都无关。
+
+    返回 ``None`` 表示这条假设无法成立（未装相机高度、视线接近水平、内参无效）。
+    """
+    if intrinsics is None or not intrinsics.is_valid():
+        return None
+    if camera_height is None or camera_height <= 0:
+        return None
+
+    fy = float(intrinsics.fy)
+    if fy <= 0:
+        return None
+
+    angle = np.deg2rad(float(pitch_deg)) + np.arctan2(
+        float(v_bottom) - float(intrinsics.cy), fy)
+    if angle <= np.deg2rad(MIN_CONTACT_ANGLE_DEG):
+        # 视线接近水平或朝上：与地面的交点不存在（或远到无意义）
+        return None
+    return float(camera_height / np.tan(angle))
+
+
+def bottom_may_touch_ground(v_bottom: float, cy: float, fy: float,
+                            pitch_deg: float = 0.0) -> bool:
+    """框底边是否落在相机水平线**以下**（即可能踩在地面上）。**纯函数**。
+
+    **不需要任何类别先验**的硬判据：底边若在相机水平线以上，「底边贴地」
+    这条假设物理上不可能成立（要与地面相交，视线必须朝下）。
+    实测「被挡到腰」那一格（底边落在画面中心线上方）就靠它拦下 ——
+    旧实现会输出 6.38 m，真实 3.00 m。
+    """
+    angle = np.deg2rad(float(pitch_deg)) + np.arctan2(
+        float(v_bottom) - float(cy), float(fy))
+    return bool(angle > np.deg2rad(MIN_CONTACT_ANGLE_DEG))
+
+
+def estimate_target_height(v_bottom: float, pixel_height: float,
+                           intrinsics, camera_height: float,
+                           pitch_deg: float = 0.0) -> Optional[float]:
+    """反解「若框底边贴地，目标应有多高」—— 判定底边语义的主力判据。**纯函数**。
+
+    先由接触点法得到距离 ``Z``，再由框高反推身高：``H = 框高 × Z / fy``。
+
+    ⚠️ 为什么**不能**图省事写成 ``H = H_相机 / k``（``k = (v_底 - cy) / 框高``）：
+    那个简化式**只在俯仰角为 0 时成立**。实测本机标定后（pitch=4°、H=1.0 m），
+    5.00 m 处一个完整的人会被简化式算成 **2.65 m** —— 凭空多出 56% 余量，
+    于是把好目标也拒掉（回归验证时当场暴露）。走接触点法没有这个偏差。
+
+    拿反解值与类别登记身高比：落在合理区间 -> 底边大概率是脚；
+    偏离 -> 框不完整，拒绝出数。实测
+    （``E:\\WorkBuddy-Work\\scripts\\verify_box_bottom_semantics.py``）
+    三个「旧实现会输错数字」的场景全部被拦下（被挡到腰由
+    ``bottom_may_touch_ground`` 拦、被挡到膝上 3.88 m、只有下巴 3.57 m），
+    而完整的成年人、1.40 m 矮个子、头顶被裁的人都照常放行。
+
+    返回 ``None`` 表示无法反解（内参无效 / 未填相机高度 / 底边在水平线以上
+    / 框高非正）。
+    """
+    if pixel_height is None or pixel_height <= 0:
+        return None
+    z = distance_from_ground_contact(v_bottom, intrinsics, camera_height,
+                                     pitch_deg)
+    if z is None:
+        return None
+    fy = float(intrinsics.fy)
+    if fy <= 0:
+        return None
+    return float(pixel_height) * z / fy
+
+
+@dataclass
+class RangingResult:
+    """一次测距的完整结论 —— 不只是数字，还包括「凭什么给这个数字」。"""
+
+    distance: Optional[float] = None    # 米；None = 不可测
+    method: str = ''                    # '接触点法' / '高度法' / '两法一致'
+    trusted: bool = True                # False = 存疑（两法打架）
+    reason: str = ''                    # 不可测或存疑的原因，供 UI 直接显示
+
+    def display(self) -> str:
+        """UI 用的短文本。存疑加「？」而不是隐藏 —— 让人知道有数据但不可全信。"""
+        if self.distance is None:
+            return '不可测'
+        return f'{self.distance:.2f} m' + ('' if self.trusted else '？')
+
+
+# ---------------------------------------------------------------------------
 # 几何测距
 # ---------------------------------------------------------------------------
 
@@ -330,6 +800,118 @@ class GeometricRanger:
             bottom_v=box.get('y', 0.0) + box.get('height', 0.0) / 2.0,
             class_name=class_name,
         )
+
+    def measure_from_box(self, box: dict, class_name: str = '',
+                         image_size=None) -> RangingResult:
+        """综合入口：先体检可见性，再选方法出数，最后两法互检。
+
+        优先级（接触点法优先，因为它不依赖目标高度）::
+
+            脚可见且已量相机高度 -> 接触点法
+            脚不可见但框完整     -> 高度法（仅限已登记真实高度的类别）
+            两法都算得出         -> 互检，差异超阈值标「存疑」
+            都不行               -> 不可测，并把原因说到点子上
+
+        **绝不返回兜底数字**：拿不到可靠值就明确说「不可测」。
+        """
+        if not self.intrinsics.is_valid():
+            return RangingResult(reason='相机未标定')
+
+        h_px = float(box.get('height', 0.0))
+        if h_px < self.config.min_pixel_height:
+            return RangingResult(reason=f'目标太小（框高 {h_px:.0f} px）')
+
+        if image_size is None:
+            image_size = self.intrinsics.image_size
+        vis = compute_box_visibility(box, image_size)
+        bottom_v = float(box.get('y', 0.0)) + h_px / 2.0
+
+        # ---- 主力判据：框底边到底能不能踩在地面上 ----
+        # 实测三种「旧实现会输出错值」的情形全部靠这一段拦下：
+        #     被挡到腰（底边落在画面中心线上方）-> bottom_may_touch_ground 硬判据
+        #     被挡到膝上 -> 反解 3.88 m（真实 3.00 m 的人）
+        #     只有下巴   -> 反解 3.57 m（真实 0.50 m）
+        # 必须**直接拒出数**，不能只标「存疑」—— 标存疑仍会把错值显示出去。
+        #
+        # 前提「框上边 == 目标头顶、下边 == 脚」只在上下边都没被画面裁掉时
+        # 成立。上边被裁 -> 反解出的身高必然偏小；下边被裁 -> 底边不是脚，
+        # 交给后面的边界门控给出更准确的理由（「脚被画面下边界裁掉」）。
+        if (vis.checked and not vis.touches_top and not vis.touches_bottom
+                and self.config.camera_height > 0
+                and self.intrinsics.is_valid()):
+            if not bottom_may_touch_ground(bottom_v, self.intrinsics.cy,
+                                           self.intrinsics.fy,
+                                           self.config.pitch_deg):
+                return RangingResult(
+                    reason=('框底边落在相机水平线以上，不可能踩在地面上：'
+                            '目标不完整'))
+            h_est = estimate_target_height(bottom_v, h_px, self.intrinsics,
+                                           self.config.camera_height,
+                                           self.config.pitch_deg)
+            h_ref = self.config.object_heights.get(class_name)
+            if h_est is not None and h_ref:
+                lo_h = h_ref * (1.0 - self.config.height_tolerance)
+                hi_h = h_ref * (1.0 + self.config.height_tolerance)
+                if not (lo_h <= h_est <= hi_h):
+                    return RangingResult(
+                        reason=(f'若框底边贴地，目标应有 {h_est:.2f} m 高，'
+                                f'超出「{class_name}」的合理范围 '
+                                f'{lo_h:.2f}~{hi_h:.2f} m：目标可能不完整'))
+
+        # ---- 兜底体检：宽高比（判别力有限，不作主力） ----
+        # 实测被挡到腰 0.56、只有下巴 0.60 都落在「站立的人」区间内，全部逃过；
+        # 它只能拦 aspect > 0.9 的极端情形（横向的手、极端特写）。
+        lim = self.config.aspect_limits.get(class_name)
+        if lim and vis.checked:
+            lo, hi = lim
+            if not (lo <= vis.aspect <= hi):
+                return RangingResult(
+                    reason=(f'框形状不像全身（宽高比 {vis.aspect:.2f}，'
+                            f'{class_name} 正常 {lo:.2f}~{hi:.2f}），目标可能不完整'))
+
+        # 高度法：要求框完整，且该类别登记过真实高度（未登记不再兜底）
+        d_height = None
+        if vis.height_method_ok and class_name in self.config.object_heights:
+            d_height = self.distance(pixel_height=h_px, bottom_v=bottom_v,
+                                     class_name=class_name)
+
+        # 接触点法：只要求脚可见
+        d_contact = None
+        if vis.ground_contact_ok:
+            d_contact = distance_from_ground_contact(
+                bottom_v, self.intrinsics, self.config.camera_height,
+                self.config.pitch_deg)
+
+        if d_contact is not None and d_height is not None:
+            diff = abs(d_contact - d_height) / max(d_contact, d_height)
+            if diff > MUTUAL_CHECK_RATIO:
+                return RangingResult(
+                    distance=d_contact, method='接触点法', trusted=False,
+                    reason=(f'两法不一致（高度法 {d_height:.2f} m / '
+                            f'接触点法 {d_contact:.2f} m）：目标可能不完整或姿态异常'))
+            return RangingResult(distance=d_contact, method='两法一致')
+
+        if d_contact is not None:
+            return RangingResult(distance=d_contact, method='接触点法')
+        if d_height is not None:
+            return RangingResult(distance=d_height, method='高度法')
+
+        # ---- 都不行：把原因说到点子上，绝不给兜底数字 ----
+        if vis.touches_bottom and vis.touches_top:
+            return RangingResult(reason='目标超出画面上下边界，无法测距')
+        if vis.touches_bottom:
+            if self.config.camera_height <= 0:
+                return RangingResult(reason='脚被画面下边界裁掉，且未填相机安装高度')
+            return RangingResult(reason='脚被画面下边界裁掉（目标太近）')
+        if class_name not in self.config.object_heights:
+            if self.config.camera_height <= 0:
+                return RangingResult(
+                    reason=f'「{class_name or "未知"}」不在高度表内，'
+                           f'且未填相机安装高度')
+            return RangingResult(reason=f'「{class_name or "未知"}」不在高度表内')
+        if self.config.camera_height <= 0:
+            return RangingResult(reason='未填相机安装高度')
+        return RangingResult(reason='测距条件不足')
 
     def focal_length_px(self) -> Optional[float]:
         """返回等效焦距（像素）。调试用。"""

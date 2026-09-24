@@ -313,6 +313,44 @@ class Ui_Form(object):
 
         self.verticalLayout_5.addLayout(self.horizontalLayout_distance)
 
+        self.horizontalLayout_mount = QHBoxLayout()
+        self.horizontalLayout_mount.setObjectName(u"horizontalLayout_mount")
+        self.label_known_dist = QLabel(self.groupBox_targetpos)
+        self.label_known_dist.setObjectName(u"label_known_dist")
+        self.label_known_dist.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.horizontalLayout_mount.addWidget(self.label_known_dist)
+
+        self.spin_known_dist = QDoubleSpinBox(self.groupBox_targetpos)
+        self.spin_known_dist.setObjectName(u"spin_known_dist")
+        self.spin_known_dist.setDecimals(2)
+        self.spin_known_dist.setMinimum(0.200000000000000)
+        self.spin_known_dist.setMaximum(50.000000000000000)
+        self.spin_known_dist.setSingleStep(0.500000000000000)
+        self.spin_known_dist.setValue(2.000000000000000)
+
+        self.horizontalLayout_mount.addWidget(self.spin_known_dist)
+
+        self.btn_mark_known = QPushButton(self.groupBox_targetpos)
+        self.btn_mark_known.setObjectName(u"btn_mark_known")
+
+        self.horizontalLayout_mount.addWidget(self.btn_mark_known)
+
+        self.btn_solve_mount = QPushButton(self.groupBox_targetpos)
+        self.btn_solve_mount.setObjectName(u"btn_solve_mount")
+        self.btn_solve_mount.setEnabled(False)
+
+        self.horizontalLayout_mount.addWidget(self.btn_solve_mount)
+
+
+        self.verticalLayout_5.addLayout(self.horizontalLayout_mount)
+
+        self.label_mount_status = QLabel(self.groupBox_targetpos)
+        self.label_mount_status.setObjectName(u"label_mount_status")
+        self.label_mount_status.setWordWrap(True)
+
+        self.verticalLayout_5.addWidget(self.label_mount_status)
+
 
         self.verticalLayout_4.addWidget(self.groupBox_targetpos)
 
@@ -891,7 +929,7 @@ class Ui_Form(object):
         self.spin_square_mm.setDecimals(1)
         self.spin_square_mm.setMinimum(1.000000000000000)
         self.spin_square_mm.setMaximum(500.000000000000000)
-        self.spin_square_mm.setValue(18.000000000000000)
+        self.spin_square_mm.setValue(17.100000000000001)
 
         self.horizontalLayout_32.addWidget(self.spin_square_mm)
 
@@ -909,14 +947,35 @@ class Ui_Form(object):
         self.spin_pitch_deg = QDoubleSpinBox(self.groupBox_calib)
         self.spin_pitch_deg.setObjectName(u"spin_pitch_deg")
         self.spin_pitch_deg.setDecimals(1)
-        self.spin_pitch_deg.setMinimum(0.000000000000000)
-        self.spin_pitch_deg.setMaximum(60.000000000000000)
+        self.spin_pitch_deg.setMinimum(-20.000000000000000)
+        self.spin_pitch_deg.setMaximum(75.000000000000000)
         self.spin_pitch_deg.setValue(0.000000000000000)
 
         self.horizontalLayout_33.addWidget(self.spin_pitch_deg)
 
 
         self.verticalLayout_calib.addLayout(self.horizontalLayout_33)
+
+        self.horizontalLayout_ch = QHBoxLayout()
+        self.horizontalLayout_ch.setObjectName(u"horizontalLayout_ch")
+        self.label_camera_height = QLabel(self.groupBox_calib)
+        self.label_camera_height.setObjectName(u"label_camera_height")
+        self.label_camera_height.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_ch.addWidget(self.label_camera_height)
+
+        self.spin_camera_height = QDoubleSpinBox(self.groupBox_calib)
+        self.spin_camera_height.setObjectName(u"spin_camera_height")
+        self.spin_camera_height.setDecimals(2)
+        self.spin_camera_height.setMinimum(0.000000000000000)
+        self.spin_camera_height.setMaximum(5.000000000000000)
+        self.spin_camera_height.setSingleStep(0.050000000000000)
+        self.spin_camera_height.setValue(0.000000000000000)
+
+        self.horizontalLayout_ch.addWidget(self.spin_camera_height)
+
+
+        self.verticalLayout_calib.addLayout(self.horizontalLayout_ch)
 
         self.horizontalLayout_34 = QHBoxLayout()
         self.horizontalLayout_34.setObjectName(u"horizontalLayout_34")
@@ -1077,6 +1136,10 @@ class Ui_Form(object):
         self.label_target_category.setText(QCoreApplication.translate("Form", u"--", None))
         self.label_distance_title.setText(QCoreApplication.translate("Form", u"\u76ee\u6807\u8ddd\u79bb\uff1a", None))
         self.label_distance_value.setText(QCoreApplication.translate("Form", u"\u4e0d\u53ef\u6d4b", None))
+        self.label_known_dist.setText(QCoreApplication.translate("Form", u"\u5df2\u77e5\u8ddd\u79bb\uff08m\uff09\uff1a", None))
+        self.btn_mark_known.setText(QCoreApplication.translate("Form", u"\u8bb0\u4e3a\u91c7\u6837\u70b9", None))
+        self.btn_solve_mount.setText(QCoreApplication.translate("Form", u"\u6c42\u89e3\u5b89\u88c5\u53c2\u6570", None))
+        self.label_mount_status.setText(QCoreApplication.translate("Form", u"\u5b89\u88c5\u53c2\u6570\u81ea\u6807\u5b9a\uff1a\u628a\u76ee\u6807\u6446\u5230\u5377\u5c3a\u5df2\u77e5\u8ddd\u79bb\u5904\u3001\u9759\u6b62\uff0c\u70b9\u300c\u8bb0\u4e3a\u91c7\u6837\u70b9\u300d\u3002\u63a8\u8350 2 m / 5 m / 10 m \u4e09\u70b9\uff08\u4e24\u70b9\u65e0\u6cd5\u81ea\u67e5\u9519\u8bef\u6807\u8bb0\uff09", None))
         self.groupBox_10.setTitle(QCoreApplication.translate("Form", u"\u6a21\u578b\u53c2\u6570\u5b9e\u65f6\u5fae\u8c03", None))
         self.label_23.setText(QCoreApplication.translate("Form", u" \u7f6e\u4fe1\u5ea6\u9608\u503c\uff1a", None))
         self.label_confidence_thres.setText(QCoreApplication.translate("Form", u"0.50", None))
@@ -1132,7 +1195,14 @@ class Ui_Form(object):
         self.label_31.setText(QCoreApplication.translate("Form", u"\u68cb\u76d8\u683c\u5185\u89d2\u70b9\uff1a", None))
         self.label_39.setText(QCoreApplication.translate("Form", u"\u00d7", None))
         self.label_40.setText(QCoreApplication.translate("Form", u"\u65b9\u683c\u8fb9\u957f\uff08mm\uff09\uff1a", None))
+#if QT_CONFIG(tooltip)
+        self.spin_square_mm.setToolTip(QCoreApplication.translate("Form", u"\u4ee5\u6253\u5370\u540e\u5b9e\u6d4b\u4e3a\u51c6\uff1a\u91cf\u56fe\u4e0a\u90a3\u6761 100mm \u6821\u9a8c\u5c3a\u2014\u2014\u6b63\u597d 100mm \u586b 18.0\uff0c\u5426\u5219\u586b\u300c18 \u00d7 \u5b9e\u6d4b\u91cf \u00f7 100\u300d\u3002\u672c\u673a\u6253\u5370\u673a\u5b9e\u6d4b 17.1mm\uff08\u7a0b\u5e8f\u9ed8\u8ba4\u503c\uff09\u3002\u586b\u9519\u8fd9\u4e00\u683c\uff0c\u5168\u90e8\u8ddd\u79bb\u7b49\u6bd4\u9519\u3002", None))
+#endif // QT_CONFIG(tooltip)
         self.label_41.setText(QCoreApplication.translate("Form", u"\u76f8\u673a\u4fef\u4ef0\u89d2\uff08\u00b0\uff09\uff1a", None))
+        self.label_camera_height.setText(QCoreApplication.translate("Form", u"\u76f8\u673a\u5b89\u88c5\u9ad8\u5ea6\uff08m\uff09\uff1a", None))
+#if QT_CONFIG(tooltip)
+        self.spin_camera_height.setToolTip(QCoreApplication.translate("Form", u"\u955c\u5934\u4e2d\u5fc3\u5230\u5730\u9762\u7684\u9ad8\u5ea6\uff08\u7c73\uff09\u3002\u53ef\u4ee5\u5377\u5c3a\u91cf\uff0c\u4e5f\u53ef\u4ee5\u5728\u300c\u76d1\u89c6\u300d\u9875\u7528\u300c\u5b89\u88c5\u53c2\u6570\u81ea\u6807\u5b9a\u300d\u89e3\u51fa\u6765\u3002", None))
+#endif // QT_CONFIG(tooltip)
         self.btn_calib_capture.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u91c7\u96c6", None))
         self.btn_calib_solve.setText(QCoreApplication.translate("Form", u"\u6c42\u89e3\u5e76\u4fdd\u5b58", None))
         self.label_calib_info.setText(QCoreApplication.translate("Form", u"\u672a\u91c7\u96c6\u3002\u70b9\u300c\u5f00\u59cb\u91c7\u96c6\u300d\uff0c\u8ba9\u68cb\u76d8\u683c\u5728\u753b\u9762\u4e2d\u53d8\u6362\u4f4d\u7f6e\u4e0e\u503e\u659c\u89d2\uff1b\u91c7\u591f 10 \u5e27\u540e\u70b9\u300c\u6c42\u89e3\u5e76\u4fdd\u5b58\u300d\u3002", None))

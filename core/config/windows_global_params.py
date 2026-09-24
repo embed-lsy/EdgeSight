@@ -51,6 +51,9 @@ class GlobalParams:
         self.calibrated=False                # 是否已有可用内参（区别于旧版的"参数已应用"）
         self.invalid_reason=''               # 内参不可用时的原因，供 UI 显示
         self.pitch_deg=0.0                   # 相机俯仰角，向下为正，单位度
+        self.camera_height=0.0               # 相机安装高度（米），卷尺量。0=未测量，
+                                             # 此时地面接触点法不可用（CHARTER 第 2 条）
+        self.height_tolerance=0.35           # 反解身高判据的容差：落在 ±35% 内视为合理
         self.object_heights=dict(_OBJECT_HEIGHTS_DEFAULT)
         self.default_object_height=1.50
         self.min_pixel_height=8              # 像素高度下限，低于此值不测距

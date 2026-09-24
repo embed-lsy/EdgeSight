@@ -6,7 +6,8 @@ from core.config.windows_global_params import GlobalParams
 from core.camera.opencv_camera import CameraInitThread
 from core.detector import ModelInitThread, YOLODetector
 from core.calibration import (CameraCalibrator, CameraIntrinsics,
-                              GeometricRanger, RangingConfig, solve_intrinsics)
+                              GeometricRanger, RangingConfig, solve_intrinsics,
+                              solve_mount_params)
 from core.recorder import Recorder, Replayer, FrameRecord
 from typing import Optional
 from collections import deque
@@ -70,6 +71,16 @@ class MainWindow(QWidget, Ui_Form):
         # 是否正在子线程求解内参。求解期间禁止重复触发（实测 50 帧要十几秒）
         self._solving = False
         self._solve_thread = None
+        # ------------------------------------------------------------------
+        # 安装参数自标定（外参：相机安装高度 + 俯仰角）
+        # ------------------------------------------------------------------
+        # 已记录的采样点：[{'dist': 已知距离m, 'v': 底边像素均值, 'std': 散布px,
+        #                  'n': 帧数}, ...]
+        self._mount_marks = []
+        self._marking = False        # 是否在采样窗口内
+        self._mark_samples = []      # 采样窗口内收集到的框底边像素
+        self._mark_distance = 0.0    # 本次采样对应的已知距离
+        self._mark_timer = None
         # 几何测距器。先无内参构造，load_calibration() 后注入
         self.ranger = GeometricRanger(CameraIntrinsics(),
                                       RangingConfig.from_params(self.global_params))
@@ -361,6 +372,10 @@ class MainWindow(QWidget, Ui_Form):
         self.slider_sample_freq.valueChanged.connect(lambda v:self.label_sample_freq.setText(f'{v}Hz'))
         self.slider_base_width.valueChanged.connect(lambda v:self.label_base_width.setText(f'{v}px'))
         self.spin_pitch_deg.valueChanged.connect(self.on_pitch_changed)
+        self.spin_camera_height.valueChanged.connect(self.on_camera_height_changed)
+        # 安装参数自标定（监视页）：由「已知距离 + 框底边像素」反解 (H, 俯仰角)
+        self.btn_mark_known.clicked.connect(self.on_mark_known_clicked)
+        self.btn_solve_mount.clicked.connect(self.on_solve_mount_clicked)
        
     def bind_other(self):
         self.tabWidget.currentChanged.connect(self.on_tab_change)
@@ -552,6 +567,14 @@ class MainWindow(QWidget, Ui_Form):
         if not (0.15 * w < intr.cx < 0.85 * w) or not (0.15 * h < intr.cy < 0.85 * h):
             warns.append(f'主点 (cx={intr.cx:.0f}, cy={intr.cy:.0f}) 明显偏离画面中心'
                          f'（画面 {w}x{h}）')
+        # fx/fy 合理区间：rms 和主点都看不出"焦距发疯"。实测 8 帧姿态不变时
+        # 能解出 fx=40847 而 rms 才 0.21 —— 那是退化解，拿去测距全是废数。
+        # 正常焦距落在 [0.2·宽, 4·宽]（对 640 宽即 128~2560 px，
+        # 覆盖约 15°~120° 水平视场角），出界基本就是退化或尺寸记录错了。
+        if not (0.2 * w <= intr.fx <= 4.0 * w) or not (0.2 * h <= intr.fy <= 4.0 * h):
+            warns.append(f'焦距 fx={intr.fx:.0f}, fy={intr.fy:.0f} 超出合理区间'
+                         f'（{0.2 * w:.0f}~{4.0 * w:.0f} px）—— 解出了退化解，'
+                         f'这份数据不可用于测距，必须重采')
 
         detail = (f'内参已保存到：\n{self._calib_file}\n\n'
                   f'fx={intr.fx:.1f}  fy={intr.fy:.1f}\n'
@@ -574,6 +597,182 @@ class MainWindow(QWidget, Ui_Form):
         """俯仰角改了立即重建测距配置 —— 不需要重标定。"""
         self.global_params.pitch_deg = float(value)
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
+
+    @Slot()
+    def on_camera_height_changed(self, value):
+        """相机安装高度改了立即重建测距配置 —— 不需要重标定。
+
+        这是地面接触点法（CHARTER 第 2 条）唯一的安装参数：卷尺量一次镜头中心
+        到地面的高度。填 0 视为「未测量」，此时接触点法与反解判据都不可用，
+        部分可见的目标会明确显示「不可测」，而不是按某个默认身高硬算。
+        """
+        self.global_params.camera_height = float(value)
+        self.ranger.update_config(RangingConfig.from_params(self.global_params))
+        self.label_distance_value.setToolTip(self._ranging_tooltip())
+
+    def _ranging_tooltip(self, res=None):
+        """距离读数的悬停说明。
+
+        优先级：**为什么不可测 > 安装参数填没填**。UI 上位置有限，但"为什么"
+        必须能查到 —— 否则用户只看到"不可测"，分不清是没填安装高度、
+        还是目标只露出一部分。这直接对应 CHARTER 里"不给猜测值"的要求。
+        """
+        if res is not None and res.reason:
+            return res.reason
+        h = self.global_params.camera_height
+        if h <= 0:
+            return ('未填相机安装高度：只能对完整可见的目标测距（高度法）。\n'
+                    '可以用卷尺量一次镜头中心到地面的高度填上，也可以在'
+                    '「安装参数自标定」里把目标摆到已知距离反解出来；\n'
+                    '填好后即可对部分可见的目标测距（如头顶出画的人）。')
+        # 俯仰角误差敏感度 ≈ 0.01745·Z/H（每 1°）—— 与 H 成反比，装得越高越不敏感。
+        # 这里算的是 10 m 处的值，用来提醒用户「角度别量错」。
+        sens = 0.01745 * 10.0 / h * 100.0
+        return (f'相机安装高度 {h:.2f} m，已启用地面接触点法。\n'
+                f'10 m 处每 1° 的俯仰角误差约带来 {sens:.0f}% 距离误差'
+                f'（装得越高越不敏感）。\n'
+                f'高度与俯仰角都可由「安装参数自标定」反解，不必手工量。')
+
+    # ------------------------------------------------------------------
+    # 安装参数自标定（外参：相机安装高度 + 俯仰角）
+    # ------------------------------------------------------------------
+    # 为什么是「标定」而不是「手工填」
+    # ------------------------------
+    # 接触点法 Z = H_相机 / tan(俯仰角 + atan((v_底 − cy)/fy)) 需要两个量：
+    # 相机装多高、朝下多少度。卷尺与量角器都能量，但**俯仰角精度极敏感** ——
+    # 10 m 处每 1° 约带来 0.01745·Z/H 的距离误差（H=0.7 m 时就是 25%/1°），
+    # 而角度恰好是最难量准的那个。反过来，把目标摆到**卷尺已知的距离**上、
+    # 读出框底边像素，两个已知距离就能把 (H, 俯仰角) 同时解出来
+    # （见 core/calibration.solve_mount_params）—— 相机装多高都能解。
+    #
+    # 为什么采一段而不是取一帧：底边像素是观测量，它的随机误差直接进解算
+    # （1 px 噪声 -> 俯仰角约 ±0.13°）。所以取 ~1 秒窗口的均值，并用散布
+    # 判断目标是否静止；散布过大就拒收这一次，而不是记一个脏点。
+
+    MARK_WINDOW_MS = 1000        # 采样窗口长度（毫秒）
+    MARK_MIN_FRAMES = 5          # 窗口内至少收到几帧有效检测
+    MARK_MAX_SPREAD_PX = 3.0     # 底边像素散布上限：超过说明目标在动
+
+    @Slot()
+    def on_mark_known_clicked(self):
+        """记一个「已知距离」采样点（窗口内取平均，避免单帧噪声）。"""
+        if not self.global_params.calibrated or self.global_params.intrinsics is None:
+            QMessageBox.warning(
+                self, '安装参数自标定',
+                '相机还没标定，没有可用内参，无法解算安装参数。\n'
+                '请先在「设置 → 相机标定」里完成棋盘格标定。')
+            return
+        if self.global_params.detection_height <= 0:
+            QMessageBox.warning(
+                self, '安装参数自标定',
+                '当前没有检测到目标，无法采样。\n\n'
+                '请让目标（人 / 椅子等）完整出现在画面里并保持静止，再点本按钮。')
+            return
+        self._marking = True
+        self._mark_samples = []
+        self._mark_distance = float(self.spin_known_dist.value())
+        self.btn_mark_known.setEnabled(False)
+        self.label_mount_status.setText(
+            f'正在采样 {self._mark_distance:.2f} m 处的目标……请让目标静止')
+        if self._mark_timer is not None:
+            self._mark_timer.stop()
+        self._mark_timer = QTimer(self)
+        self._mark_timer.setSingleShot(True)
+        self._mark_timer.timeout.connect(self.on_mark_finished)
+        self._mark_timer.start(self.MARK_WINDOW_MS)
+
+    @Slot()
+    def on_mark_finished(self):
+        """采样窗口结束：先查帧数与散布，合格才记为一个采样点。"""
+        self._marking = False
+        self.btn_mark_known.setEnabled(True)
+        samples = self._mark_samples
+        self._mark_samples = []
+        z = self._mark_distance
+
+        if len(samples) < self.MARK_MIN_FRAMES:
+            self.label_mount_status.setText(
+                f'采样失败：这 {self.MARK_WINDOW_MS / 1000:.0f} 秒里只检测到 '
+                f'{len(samples)} 帧（至少需要 {self.MARK_MIN_FRAMES} 帧）。'
+                f'请让目标完整出现在画面里再重试。')
+            return
+        arr = np.asarray(samples, dtype=float)
+        spread = float(arr.std())
+        if spread > self.MARK_MAX_SPREAD_PX:
+            self.label_mount_status.setText(
+                f'采样失败：框底边像素散布 {spread:.1f} px 偏大'
+                f'（> {self.MARK_MAX_SPREAD_PX:.0f} px），目标可能在移动。'
+                f'请让目标静止后重新采样。')
+            return
+
+        # 同一个距离重复标记 -> 覆盖，避免列表里堆互相矛盾的点
+        self._mount_marks = [m for m in self._mount_marks
+                             if abs(m['dist'] - z) > 0.05]
+        self._mount_marks.append({'dist': z, 'v': float(arr.mean()),
+                                  'std': spread, 'n': len(arr)})
+        self._mount_marks.sort(key=lambda m: m['dist'])
+        self.btn_solve_mount.setEnabled(len(self._mount_marks) >= 2)
+        self._update_mount_status()
+
+    def _update_mount_status(self):
+        """把已记录的采样点回显到监视页（含还差几个、能不能求解）。"""
+        marks = self._mount_marks
+        text = '已记录采样点：' + '、'.join(
+            f"距离 {m['dist']:.2f} m → 底边 {m['v']:.0f} px"
+            f"（{m['n']} 帧，散布 {m['std']:.1f} px）" for m in marks)
+        if len(marks) < 2:
+            text += (f'\n还差 {2 - len(marks)} 个：换一个距离'
+                     f'（推荐 5 m、10 m）再点一次「记为采样点」')
+        elif len(marks) == 2:
+            text += ('\n可以点「求解安装参数」。注意两点**无法自查**标记错误'
+                     '（如把膝盖当成脚），建议再补一个距离做三点')
+        else:
+            text += '\n可以点「求解安装参数」'
+        self.label_mount_status.setText(text)
+
+    @Slot()
+    def on_solve_mount_clicked(self):
+        """由采样点反解 (相机安装高度, 俯仰角)，并写回设置页立即生效。"""
+        intr = self.global_params.intrinsics
+        if intr is None or not intr.is_valid():
+            QMessageBox.warning(self, '安装参数自标定',
+                                '相机未标定（没有可用内参），无法解算安装参数。')
+            return
+        marks = [(m['dist'], m['v']) for m in self._mount_marks]
+        sol = solve_mount_params(marks, intr)
+        if not sol.ok:
+            self.label_mount_status.setText(f'求解未通过：{sol.reason}')
+            QMessageBox.warning(
+                self, '安装参数自标定',
+                f'{sol.reason}\n\n已记录的采样点保留，可补采后重试。')
+            return
+
+        # 写回设置页：与手工填写走**同一条通路**（控件 valueChanged -> 重建
+        # 测距配置）。控件精度（高度 2 位、俯仰角 1 位）会截断解出的值，
+        # 所以按截断后的值再显式同步一次，避免"显示的值"与"实际生效的值"不一致。
+        self.spin_camera_height.setValue(round(sol.camera_height, 2))
+        self.spin_pitch_deg.setValue(round(sol.pitch_deg, 1))
+        h_applied = float(self.spin_camera_height.value())
+        pitch_applied = float(self.spin_pitch_deg.value())
+        self.global_params.camera_height = h_applied
+        self.global_params.pitch_deg = pitch_applied
+        self.ranger.update_config(RangingConfig.from_params(self.global_params))
+        self.label_distance_value.setToolTip(self._ranging_tooltip())
+
+        sens = (0.01745 * 10.0 / h_applied * sol.sigma_pitch * 100.0
+                if h_applied > 0 else float('nan'))
+        self.label_mount_status.setText(
+            f'已解出：安装高度 {h_applied:.2f} m、俯仰角 {pitch_applied:.1f}°'
+            f'（残差 {sol.residual_px:.2f} px，用了 {sol.n_points} 个采样点）')
+        QMessageBox.information(
+            self, '安装参数自标定',
+            f'{sol.detail}\n\n'
+            f'估计精度（按底边定位误差 1 px 估计）：\n'
+            f'    相机高度 ±{sol.sigma_height * 100:.1f} cm\n'
+            f'    俯仰角   ±{sol.sigma_pitch:.2f}°\n\n'
+            f'已写入「设置 → 相机标定」：安装高度 {h_applied:.2f} m、'
+            f'俯仰角 {pitch_applied:.1f}°，已立即生效。\n'
+            f'按这两个数，10 m 处由俯仰角误差贡献的距离误差约 {sens:.1f}%。')
 
     # ------------------------------------------------------------------
     # 录制回放（CHARTER「范围内的」第 6 条）
@@ -1019,21 +1218,34 @@ class MainWindow(QWidget, Ui_Form):
             self.lcd_credibility.display(0)
         
         # 几何测距：**常开**。测距是门槛判据「UI 实时显示测距值」的核心输出，
-        # 不应依赖「是否启用深度分析」或「是否在录制」；
-        # 未标定 / 目标太小时 distance() 自己返回 None（明确不可测，不给猜测值）。
-        dist = None
+        # 不应依赖「是否启用深度分析」或「是否在录制」。
+        #
+        # 这里走 measure_from_box 而不是 distance_from_box：前者在出数之前先过
+        # 可见性体检与反解判据，目标只露出一部分（贴脸、被挡到腰/膝）时明确返回
+        # 「不可测 + 原因」。检测框是**可见部分**的包围盒，直接拿框高套公式
+        # 会给出看着正常、却差几倍的错值（实测"贴脸"那格虚大 1248%）。
+        res = None
         if self.global_params.detection_height > 0:
-            dist = self.ranger.distance_from_box(
+            res = self.ranger.measure_from_box(
                 target if isinstance(target, dict) else {},
                 self.global_params.target_category,
             )
+        dist = res.distance if res is not None else None
         self.global_params.distance = dist
 
         # 实时距离读数（监视页「目标位置」分组，CHARTER 门槛判据）
-        if dist is not None:
-            self.label_distance_value.setText(f'{dist:.2f} m')
-        else:
-            self.label_distance_value.setText('不可测')
+        # display() 在存疑时给 "5.00 m？"、不可测时给 "不可测"，都不隐藏数据
+        self.label_distance_value.setText(res.display() if res is not None else '不可测')
+        self.label_distance_value.setToolTip(self._ranging_tooltip(res))
+
+        # 安装参数自标定：采样窗口内收集「框底边像素」（只收真的检测到目标的帧）。
+        # 底边像素是自标定的观测量，它的随机误差直接进解算 —— 所以取一段窗口
+        # 的平均值，并在收尾时用散布判断目标是否静止。
+        if self._marking and isinstance(target, dict) \
+                and self.global_params.detection_height > 0:
+            self._mark_samples.append(
+                float(target.get('y', 0.0))
+                + float(self.global_params.detection_height) / 2.0)
 
         if self.global_params.plot_enable:
             # 距离为 None 时曲线落 0（pyqtgraph 不画 None），但状态栏与录制
@@ -1134,6 +1346,10 @@ class MainWindow(QWidget, Ui_Form):
         # 停止采集，避免关闭时还持有标定器
         self.calibrator = None
         self._collecting = False
+        # 安装参数自标定的采样窗口：关窗时停掉定时器，避免回调打到已销毁的控件
+        self._marking = False
+        if self._mark_timer is not None and self._mark_timer.isActive():
+            self._mark_timer.stop()
         # 求解线程可能正卡在 cv2.calibrateCamera（十几秒），**必须等它退出**，
         # 否则关窗时线程还在跑会崩。顺便断开信号：关窗口不该再弹标定结果。
         th = getattr(self, '_solve_thread', None)

@@ -362,6 +362,66 @@ QLineEdit, QTextEdit {
                     </item>
                    </layout>
                   </item>
+                  <item>
+                   <layout class="QHBoxLayout" name="horizontalLayout_mount">
+                    <item>
+                     <widget class="QLabel" name="label_known_dist">
+                      <property name="text">
+                       <string>已知距离（m）：</string>
+                      </property>
+                      <property name="alignment">
+                       <set>Qt::AlignmentFlag::AlignCenter</set>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QDoubleSpinBox" name="spin_known_dist">
+                      <property name="decimals">
+                       <number>2</number>
+                      </property>
+                      <property name="minimum">
+                       <double>0.200000000000000</double>
+                      </property>
+                      <property name="maximum">
+                       <double>50.000000000000000</double>
+                      </property>
+                      <property name="singleStep">
+                       <double>0.500000000000000</double>
+                      </property>
+                      <property name="value">
+                       <double>2.000000000000000</double>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QPushButton" name="btn_mark_known">
+                      <property name="text">
+                       <string>记为采样点</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QPushButton" name="btn_solve_mount">
+                      <property name="enabled">
+                       <bool>false</bool>
+                      </property>
+                      <property name="text">
+                       <string>求解安装参数</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </item>
+                  <item>
+                   <widget class="QLabel" name="label_mount_status">
+                    <property name="text">
+                     <string>安装参数自标定：把目标摆到卷尺已知距离处、静止，点「记为采样点」。推荐 2 m / 5 m / 10 m 三点（两点无法自查错误标记）</string>
+                    </property>
+                    <property name="wordWrap">
+                     <bool>true</bool>
+                    </property>
+                   </widget>
+                  </item>
                  </layout>
                 </widget>
                </item>
@@ -1155,7 +1215,10 @@ QLineEdit, QTextEdit {
                    <double>500.000000000000000</double>
                   </property>
                   <property name="value">
-                   <double>18.000000000000000</double>
+                   <double>17.100000000000001</double>
+                  </property>
+                  <property name="toolTip">
+                   <string>以打印后实测为准：量图上那条 100mm 校验尺——正好 100mm 填 18.0，否则填「18 × 实测量 ÷ 100」。本机打印机实测 17.1mm（程序默认值）。填错这一格，全部距离等比错。</string>
                   </property>
                  </widget>
                 </item>
@@ -1182,10 +1245,49 @@ QLineEdit, QTextEdit {
                    <number>1</number>
                   </property>
                   <property name="minimum">
+                   <double>-20.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>75.000000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>0.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_ch">
+                <item>
+                 <widget class="QLabel" name="label_camera_height">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>40</height>
+                   </size>
+                  </property>
+                  <property name="text">
+                   <string>相机安装高度（m）：</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QDoubleSpinBox" name="spin_camera_height">
+                  <property name="toolTip">
+                   <string>镜头中心到地面的高度（米）。可以卷尺量，也可以在「监视」页用「安装参数自标定」解出来。</string>
+                  </property>
+                  <property name="decimals">
+                   <number>2</number>
+                  </property>
+                  <property name="minimum">
                    <double>0.000000000000000</double>
                   </property>
                   <property name="maximum">
-                   <double>60.000000000000000</double>
+                   <double>5.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.050000000000000</double>
                   </property>
                   <property name="value">
                    <double>0.000000000000000</double>
