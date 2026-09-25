@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from dataclasses import dataclass, asdict, field
 from typing import Optional, Tuple
 
@@ -542,6 +543,83 @@ def solve_mount_params(marks, intrinsics,
 
 
 # ---------------------------------------------------------------------------
+# 安装参数持久化（外参：相机安装高度 + 俯仰角）
+# ---------------------------------------------------------------------------
+#
+# 为什么必须落盘
+# ------------
+# 内参有 ``models/calib.json`` 持久化，安装参数却只活在内存里（``GlobalParams``），
+# 于是**每次启动程序都要重新解一遍或重新填一遍** —— 这正是「棋盘标完之后
+# 还要再搞一次」的繁琐来源。两者同属「装一次、长期用」的量，必须一起落盘。
+#
+# 为什么与内参分开存
+# --------------
+# 两者的**生命周期不同**：内参跟**相机本体**走（换相机才重标），安装参数跟
+# **机位**走（挪相机才重做）。合成一个文件会让「重标内参」把安装参数一并冲掉，
+# 反过来也是 —— 而这两件事恰好是部署时最常各自发生一次的动作。
+#
+# 为什么只存两个数字却要单独一个文件
+# -----------------------------
+# 「解出来的安装参数」是**证据链的一部分**：它必须能回答「这组 H/θ 是怎么来的、
+# 什么时候定的」。所以除了两个数值，还记来源（自标定 / 手工填写）与时间戳 ——
+# 排查「距离集体偏大」时，第一个要问的就是「H/θ 是什么时候、怎么来的」。
+
+MOUNT_PARAMS_VERSION = 1
+
+
+def save_mount_params(path: str, camera_height: float, pitch_deg: float,
+                      source: str = '', note: str = '') -> None:
+    """把安装参数写入 JSON。**任何一次求解成功或手工修改后都应调用**。
+
+    只做落盘，不做校验 —— 校验在 ``solve_mount_params`` 里已经做过，
+    这里再拦一次会让「手工填一个中间值先看看效果」这种正常操作变得不可能。
+    """
+    payload = {
+        'version': MOUNT_PARAMS_VERSION,
+        'camera_height': round(float(camera_height), 4),
+        'pitch_deg': round(float(pitch_deg), 4),
+        'source': source,
+        'saved_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'note': note,
+    }
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def load_mount_params(path: str) -> Optional[dict]:
+    """读取安装参数。文件不存在或损坏都返回 ``None``（视为「还没定过」）。
+
+    与内参加载一样：**读不到不是错误**，只是「安装参数未知」，此时接触点法
+    明确不可用，而不是拿一个默认值硬算。所以这里吞掉解析异常，交由调用方
+    按「无参数」处理。
+    """
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    out = {}
+    for k in ('camera_height', 'pitch_deg'):
+        try:
+            out[k] = float(data.get(k, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return None
+    if out['camera_height'] < 0 or not math.isfinite(out['camera_height']):
+        return None
+    if not math.isfinite(out['pitch_deg']):
+        return None
+    out['source'] = str(data.get('source', '') or '')
+    out['saved_at'] = str(data.get('saved_at', '') or '')
+    out['note'] = str(data.get('note', '') or '')
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 可见性体检 —— 出数字之前的检查（不检查就出数 = 在零证据下自信地给错值）
 # ---------------------------------------------------------------------------
 
@@ -897,11 +975,21 @@ class GeometricRanger:
             return RangingResult(distance=d_height, method='高度法')
 
         # ---- 都不行：把原因说到点子上，绝不给兜底数字 ----
-        if vis.touches_bottom and vis.touches_top:
-            return RangingResult(reason='目标超出画面上下边界，无法测距')
         if vis.touches_bottom:
+            # 先判「脚被画面下边界裁掉」这一族，**原因始终指向脚**。
+            #
+            # 原来的顺序是「上下都贴边」优先、给一句「目标超出画面上下边界，无法测距」。
+            # 但本项目典型安装参数下（H = 0.65 m、俯仰角 5°），人走到脚出画的距离
+            # （约 1.9 m）时**头顶必然早已出画**（头顶出画的临界在 3 m 开外）——
+            # 于是那句笼统的话会把真正有用的一句（脚被裁）**永远挡在后面**。
+            # 实测在真实走近场景里就是这样：用户只看到「目标超出画面上下边界」，
+            # 既不知道是"太近"、更不知道该怎么办。
             if self.config.camera_height <= 0:
                 return RangingResult(reason='脚被画面下边界裁掉，且未填相机安装高度')
+            if vis.touches_top:
+                return RangingResult(
+                    reason='脚被画面下边界裁掉（目标太近，整个人撑满了画面）：'
+                           '两条几何法都以「框底边 = 脚」为前提，脚不在画面里就无解')
             return RangingResult(reason='脚被画面下边界裁掉（目标太近）')
         if class_name not in self.config.object_heights:
             if self.config.camera_height <= 0:

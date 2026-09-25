@@ -313,6 +313,13 @@ class Ui_Form(object):
 
         self.verticalLayout_5.addLayout(self.horizontalLayout_distance)
 
+        self.label_distance_reason = QLabel(self.groupBox_targetpos)
+        self.label_distance_reason.setObjectName(u"label_distance_reason")
+        self.label_distance_reason.setWordWrap(True)
+        self.label_distance_reason.setStyleSheet(u"font-size: 9pt;")
+
+        self.verticalLayout_5.addWidget(self.label_distance_reason)
+
         self.horizontalLayout_mount = QHBoxLayout()
         self.horizontalLayout_mount.setObjectName(u"horizontalLayout_mount")
         self.label_known_dist = QLabel(self.groupBox_targetpos)
@@ -883,6 +890,45 @@ class Ui_Form(object):
         self.groupBox_calib.setObjectName(u"groupBox_calib")
         self.verticalLayout_calib = QVBoxLayout(self.groupBox_calib)
         self.verticalLayout_calib.setObjectName(u"verticalLayout_calib")
+        self.horizontalLayout_camdev = QHBoxLayout()
+        self.horizontalLayout_camdev.setObjectName(u"horizontalLayout_camdev")
+        self.label_camera_device = QLabel(self.groupBox_calib)
+        self.label_camera_device.setObjectName(u"label_camera_device")
+        self.label_camera_device.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_camdev.addWidget(self.label_camera_device)
+
+        self.combo_camera_device = QComboBox(self.groupBox_calib)
+        self.combo_camera_device.setObjectName(u"combo_camera_device")
+
+        self.horizontalLayout_camdev.addWidget(self.combo_camera_device)
+
+
+        self.verticalLayout_calib.addLayout(self.horizontalLayout_camdev)
+
+        self.label_camera_status = QLabel(self.groupBox_calib)
+        self.label_camera_status.setObjectName(u"label_camera_status")
+        self.label_camera_status.setWordWrap(True)
+
+        self.verticalLayout_calib.addWidget(self.label_camera_status)
+
+        self.horizontalLayout_cambind = QHBoxLayout()
+        self.horizontalLayout_cambind.setObjectName(u"horizontalLayout_cambind")
+        self.btn_camera_bind = QPushButton(self.groupBox_calib)
+        self.btn_camera_bind.setObjectName(u"btn_camera_bind")
+        self.btn_camera_bind.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_cambind.addWidget(self.btn_camera_bind)
+
+        self.btn_camera_scan = QPushButton(self.groupBox_calib)
+        self.btn_camera_scan.setObjectName(u"btn_camera_scan")
+        self.btn_camera_scan.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_cambind.addWidget(self.btn_camera_scan)
+
+
+        self.verticalLayout_calib.addLayout(self.horizontalLayout_cambind)
+
         self.horizontalLayout_31 = QHBoxLayout()
         self.horizontalLayout_31.setObjectName(u"horizontalLayout_31")
         self.label_31 = QLabel(self.groupBox_calib)
@@ -1136,6 +1182,7 @@ class Ui_Form(object):
         self.label_target_category.setText(QCoreApplication.translate("Form", u"--", None))
         self.label_distance_title.setText(QCoreApplication.translate("Form", u"\u76ee\u6807\u8ddd\u79bb\uff1a", None))
         self.label_distance_value.setText(QCoreApplication.translate("Form", u"\u4e0d\u53ef\u6d4b", None))
+        self.label_distance_reason.setText("")
         self.label_known_dist.setText(QCoreApplication.translate("Form", u"\u5df2\u77e5\u8ddd\u79bb\uff08m\uff09\uff1a", None))
         self.btn_mark_known.setText(QCoreApplication.translate("Form", u"\u8bb0\u4e3a\u91c7\u6837\u70b9", None))
         self.btn_solve_mount.setText(QCoreApplication.translate("Form", u"\u6c42\u89e3\u5b89\u88c5\u53c2\u6570", None))
@@ -1165,10 +1212,10 @@ class Ui_Form(object):
         self.btn_model_browse.setText(QCoreApplication.translate("Form", u"\u6d4f\u89c8", None))
         self.label_34.setText(QCoreApplication.translate("Form", u"\u5f53\u524d\u6a21\u578b\uff1a", None))
         self.label_model_path.setText(QCoreApplication.translate("Form", u"\u5f53\u524d\u6a21\u578b", None))
-        self.label_33.setText(QCoreApplication.translate("Form", u"\u6807\u7b7e\u6587\u4ef6\u6587\u4ef6\uff1a", None))
+        self.label_33.setText(QCoreApplication.translate("Form", u"\u6807\u7b7e\u6587\u4ef6\uff1a", None))
         self.btn_label_browse.setText(QCoreApplication.translate("Form", u"\u6d4f\u89c8", None))
         self.label_35.setText(QCoreApplication.translate("Form", u"\u5f53\u524d\u6807\u7b7e\uff1a", None))
-        self.label_label_path.setText(QCoreApplication.translate("Form", u"\u5f53\u524d\u6a21\u578b", None))
+        self.label_label_path.setText(QCoreApplication.translate("Form", u"\u5f53\u524d\u6807\u7b7e", None))
         self.label_36.setText(QCoreApplication.translate("Form", u"\u786c\u4ef6\u52a0\u901f\u5668\uff1a", None))
         self.combo_hardware_accel.setItemText(0, QCoreApplication.translate("Form", u"CPU", None))
         self.combo_hardware_accel.setItemText(1, QCoreApplication.translate("Form", u"GPU", None))
@@ -1192,6 +1239,19 @@ class Ui_Form(object):
         self.label_30.setText(QCoreApplication.translate("Form", u"\u6807\u5b9a\u72b6\u6001\uff1a", None))
         self.label__calibrate_status.setText(QCoreApplication.translate("Form", u"\u672a\u6807\u5b9a", None))
         self.groupBox_calib.setTitle(QCoreApplication.translate("Form", u"\u76f8\u673a\u6807\u5b9a", None))
+        self.label_camera_device.setText(QCoreApplication.translate("Form", u"\u672c\u673a\u6444\u50cf\u5934\uff1a", None))
+#if QT_CONFIG(tooltip)
+        self.combo_camera_device.setToolTip(QCoreApplication.translate("Form", u"\u7a0b\u5e8f\u56fa\u5b9a\u6253\u5f00\u7d22\u5f15 0 \u7684\u6444\u50cf\u5934\u3002\u672c\u673a\u53ea\u6709\u4e00\u53f0\u65f6\u4f1a\u81ea\u52a8\u786e\u8ba4\uff1b\u6709\u591a\u53f0\u65f6\u8bf7\u5728\u8fd9\u91cc\u6307\u660e\u7a0b\u5e8f\u6b63\u5728\u7528\u7684\u662f\u54ea\u4e00\u53f0\u2014\u2014\u6807\u5b9a\u7ed3\u679c\u6309\u8bbe\u5907\u5206\u522b\u4fdd\u5b58\uff0c\u6362\u76f8\u673a\u4e0d\u4f1a\u6df7\u7528\u522b\u4eba\u7684\u5185\u53c2\u3002", None))
+#endif // QT_CONFIG(tooltip)
+        self.label_camera_status.setText(QCoreApplication.translate("Form", u"\u6b63\u5728\u8bc6\u522b\u6444\u50cf\u5934\u2026\u2026", None))
+#if QT_CONFIG(tooltip)
+        self.btn_camera_bind.setToolTip(QCoreApplication.translate("Form", u"\u628a\u5f53\u524d\u5df2\u7ecf\u52a0\u8f7d\u7684\u6807\u5b9a\u8ba4\u5230\u8fd9\u53f0\u8bbe\u5907\u540d\u4e0b\u3002\u9002\u7528\u4e8e\u300c\u5347\u7ea7\u540e\u6cbf\u7528\u7740\u65e7\u6807\u5b9a\u6587\u4ef6\u3001\u4e14\u786e\u5b9a\u5c31\u662f\u8fd9\u53f0\u76f8\u673a\u62cd\u7684\u300d\u2014\u2014\u4e0d\u60f3\u518d\u6807\u4e00\u6b21\u5c31\u70b9\u5b83\u3002", None))
+#endif // QT_CONFIG(tooltip)
+        self.btn_camera_bind.setText(QCoreApplication.translate("Form", u"\u628a\u5f53\u524d\u6807\u5b9a\u7ed1\u5b9a\u5230\u672c\u8bbe\u5907", None))
+#if QT_CONFIG(tooltip)
+        self.btn_camera_scan.setToolTip(QCoreApplication.translate("Form", u"\u91cd\u65b0\u679a\u4e3e\u4e00\u6b21\u672c\u673a\u6444\u50cf\u5934\uff08\u63d2\u62d4\u8bbe\u5907\u540e\u7528\uff09\u3002\u6b63\u5e38\u8bc6\u522b\u662f\u6beb\u79d2\u7ea7\u7684\uff0c\u70b9\u5b83\u4e0d\u4f1a\u6709\u660e\u663e\u7b49\u5f85\u3002", None))
+#endif // QT_CONFIG(tooltip)
+        self.btn_camera_scan.setText(QCoreApplication.translate("Form", u"\u91cd\u65b0\u68c0\u6d4b\u8bbe\u5907", None))
         self.label_31.setText(QCoreApplication.translate("Form", u"\u68cb\u76d8\u683c\u5185\u89d2\u70b9\uff1a", None))
         self.label_39.setText(QCoreApplication.translate("Form", u"\u00d7", None))
         self.label_40.setText(QCoreApplication.translate("Form", u"\u65b9\u683c\u8fb9\u957f\uff08mm\uff09\uff1a", None))

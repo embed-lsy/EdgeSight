@@ -29,3 +29,9 @@ recordings/
 
 # 标定产物（设备相关，换相机需重标，不入库）
 models/calib.json
+# 内参档案库（按设备指纹分档记忆，设备相关，不入库）
+models/cameras.json
+# 安装参数（机位相关，挪相机需重做，不入库）
+models/mount.json
+# 模型选择记忆（机器路径相关，不入库）
+models/settings.json

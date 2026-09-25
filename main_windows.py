@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QApplication,QPushButton,QBoxLayout,QWidget,QGroupBox,QLabel,QMessageBox,QFileDialog,QStatusBar
+from PySide6.QtWidgets import QApplication,QPushButton,QBoxLayout,QWidget,QGroupBox,QLabel,QMessageBox,QFileDialog,QStatusBar,QInputDialog
 from PySide6.QtCore import Qt,Slot,QTimer,QThread,Signal,QObject
 from PySide6.QtGui import QIcon,QPixmap,QImage
 from ui.Ui_EdgeSightMain import Ui_Form
@@ -7,12 +7,18 @@ from core.camera.opencv_camera import CameraInitThread
 from core.detector import ModelInitThread, YOLODetector
 from core.calibration import (CameraCalibrator, CameraIntrinsics,
                               GeometricRanger, RangingConfig, solve_intrinsics,
-                              solve_mount_params)
+                              solve_mount_params, save_mount_params,
+                              load_mount_params)
 from core.recorder import Recorder, Replayer, FrameRecord
+# 摄像头设备识别（CHARTER「范围内的」第 1 条：内参按设备记忆）
+from core.camera.device_identity import (IdentityReport, enumerate_cameras,
+                                        resolve_active_device)
+from core import camera_profiles as cam_profiles
 from typing import Optional
 from collections import deque
 import sys
 import cv2
+import json
 import numpy as np
 import pyqtgraph as pg
 import os
@@ -48,8 +54,31 @@ class CalibSolveThread(QThread):
             self.solved.emit(None, str(e))
 
 
+class DeviceIdentifyThread(QThread):
+    """后台枚举摄像头设备（只有**兜底通路**才需要异步）。
+
+    为什么路径要分开：Windows 上主通路（读注册表）实测 ~1.4 ms，比一次界面
+    重绘还便宜，同步跑即可；但它在个别机器上会失败，兜底要调 PowerShell，
+    实测 **4.9~6.8 s**。放在启动路径上同步跑，就是开窗即见的几秒卡顿。
+
+    所以：快通路同步、慢通路异步（见 ``MainWindow._scan_camera_devices``）。
+    """
+
+    identified = Signal(object)          # IdentityReport
+
+    def run(self):
+        try:
+            rep = enumerate_cameras(allow_slow_fallback=True)
+        except Exception as e:                                   # noqa: BLE001
+            # 线程里的异常不会自动冒到主线程，这里必须自己兜住，
+            # 否则表现为「界面一直停在识别中」
+            rep = IdentityReport(provider='', error=f'设备枚举异常：{e}')
+        self.identified.emit(rep)
+
+
 class MainWindow(QWidget, Ui_Form):
     frame_signal = Signal(np.ndarray)  # 定义类属性
+
     def __init__(self):
         super(MainWindow, self).__init__()
         self.setupUi(self)
@@ -81,6 +110,9 @@ class MainWindow(QWidget, Ui_Form):
         self._mark_samples = []      # 采样窗口内收集到的框底边像素
         self._mark_distance = 0.0    # 本次采样对应的已知距离
         self._mark_timer = None
+        # 正在把落盘的安装参数回填到控件期间为 True —— 用来区分「加载」与
+        # 「用户手工修改」，避免启动时把加载动作当成用户改动又写回一次
+        self._loading_mount = False
         # 几何测距器。先无内参构造，load_calibration() 后注入
         self.ranger = GeometricRanger(CameraIntrinsics(),
                                       RangingConfig.from_params(self.global_params))
@@ -108,6 +140,24 @@ class MainWindow(QWidget, Ui_Form):
         # 初始化状态栏
         self.status_bar=QStatusBar(self)
         self.layout().addWidget(self.status_bar)
+        # ------------------------------------------------------------------
+        # 摄像头设备识别（CHARTER「范围内的」第 1 条：内参按设备记忆）
+        # ------------------------------------------------------------------
+        # 为什么要「记设备」：内参跟着**相机本体**走。旧实现只有一个
+        # models/calib.json，隐含假设「这台机器只有一台相机」—— 换一台
+        # **同分辨率**的相机会静默沿用旧内参：距离系统性错、界面零提示
+        # （相机的 _tune_if_needed 还会把画面调回 640x480，把尺寸凑巧对上，
+        # 进一步掩盖问题）。现在按设备指纹分档存：换设备能认出来，
+        # 没标定会提醒标定，分辨率不符会拒用而不是硬算。
+        self._cam_store_path = None       # models/cameras.json
+        self._cam_store = {}              # 档案库（按设备指纹分档）
+        self._identity_report = None      # 上一次枚举结果（含通路与耗时）
+        self._cam_active = None           # ActiveDevice：正在用的那台是谁、有多确定
+        self._cam_decision = None         # CalibrationDecision：本次用哪份内参
+        self._legacy_intrinsics = None    # 旧的单文件标定（兼容与过渡）
+        self._identify_thread = None      # 兜底枚举线程（慢通路必须异步）
+        self._loading_device = False      # 程序回填下拉框期间，挡住「用户选择」误判
+        self._calib_prompted = False      # 「未标定」提醒每轮启动只弹一次
         #初始化UI
         self.init_ui()
         # 先为每个plot控件添加图例，确保曲线名字能显示
@@ -137,6 +187,7 @@ class MainWindow(QWidget, Ui_Form):
         self.detector_thread.setObjectName('DetectorThread')
         #初始化摄像头和AI模型
         self.async_init_camera()
+        self._apply_default_model_paths()
         self.async_init_ai_model()
         #延迟初始化图表
         self._analysis_plot_inited=False
@@ -185,9 +236,12 @@ class MainWindow(QWidget, Ui_Form):
         self.lcd_credibility.display(self.global_params.credibility)
         self.label_target_category.setText(self.global_params.target_category)
         self.update_specific_class_combo()
-        #相机标定：把已保存的内参加载进来，并刷新 UI 显示
+        #相机标定：先认「本机是哪台相机」，再按设备取内参（见 load_calibration）
         self.load_calibration()
+        #安装参数（相机高度 + 俯仰角）：与内参同理，落盘后启动即回填
+        self.load_mount_params_ui()
         self.refresh_calib_widgets()
+        self.refresh_camera_widgets()
     
     #摄像头线程启动
     def async_init_camera(self):
@@ -200,6 +254,9 @@ class MainWindow(QWidget, Ui_Form):
         if success:
             self.cap = self.camera_thread.cap
             self.status_bar.showMessage(message, 3000)
+            # 拿到真实画面尺寸后复核内参判定：启动时相机可能还没开，
+            # 那时跳过分辨率校验，这里必须补上（标定分辨率≠当前分辨率是要拦的错）
+            self.verify_calibration_against_frame()
         else:
             self.lbl_original.setText("摄像头未连接")
             self.lbl_process.setText('摄像头未连接')
@@ -216,19 +273,17 @@ class MainWindow(QWidget, Ui_Form):
                 self.frame_signal.disconnect()# 阻断旧信号槽
             except:
                 pass
+            old = self.detector
             try:
-                if self.detector:
-                    self.detector.detection_ready.disconnect(self.on_detection_ready)
+                if old:
+                    old.detection_ready.disconnect(self.on_detection_ready)
             except:
                 pass
-            
-            if hasattr(self,'detector_thread') and self.detector_thread.isRunning():
-                self.detector_thread.quit()
-                if not self.detector_thread.wait(5000):
-                    self.detector_thread.terminate()#强制终止
-                    self.detector_thread.wait()
-            
+            # 常驻 detector_thread 不退出（退出+重建会在主线程上等待，卡界面），
+            # 旧 detector 交给它所属线程的事件循环去删
             self.detector=None #去除旧对象
+            if old is not None:
+                old.deleteLater()
 
         self.status_bar.showMessage(
             "正在后台加载 AI 模型……（界面可继续操作，加载完自动生效）")
@@ -267,6 +322,10 @@ class MainWindow(QWidget, Ui_Form):
                 self.detector.detection_ready.connect(self.on_detection_ready)
                 if not self.detector_thread.isRunning():
                     self.detector_thread.start()
+                # 标签与类别下拉跟着这次加载的模型走（不依赖用户手动选过标签）
+                self.labels = list(self.detector.labels or [])
+                self.update_specific_class_combo()
+                self._save_model_settings()   # 记住这次生效的组合
                 self.status_bar.showMessage('AI模型加载并初始化成功',3000)
             else:
                 self.status_bar.showMessage('Detector加载模型失败', 5000)
@@ -376,7 +435,12 @@ class MainWindow(QWidget, Ui_Form):
         # 安装参数自标定（监视页）：由「已知距离 + 框底边像素」反解 (H, 俯仰角)
         self.btn_mark_known.clicked.connect(self.on_mark_known_clicked)
         self.btn_solve_mount.clicked.connect(self.on_solve_mount_clicked)
-       
+        # 摄像头设备（设置页）：像蓝牙那样按设备记标定
+        self.combo_camera_device.currentIndexChanged.connect(
+            self.on_camera_device_chosen)
+        self.btn_camera_bind.clicked.connect(self.on_bind_camera_clicked)
+        self.btn_camera_scan.clicked.connect(self.on_rescan_camera_clicked)
+
     def bind_other(self):
         self.tabWidget.currentChanged.connect(self.on_tab_change)
 
@@ -384,36 +448,402 @@ class MainWindow(QWidget, Ui_Form):
     # 相机标定（CHARTER「范围内的」第 1 条）
     # ------------------------------------------------------------------
     def load_calibration(self):
-        """从磁盘加载内参，并注入测距器。
+        """按「本机是哪台相机」加载对应内参。
 
-        没有标定文件不是错误 —— 只是测距不可用。所以这里只记录原因，
-        不阻塞启动。UI 上会明确显示"未标定"，而不是静默给一个假距离。
+        与旧实现的区别
+        -------------
+        旧实现直接读 ``models/calib.json`` 就用 —— 隐含假设「这台机器上只有一台
+        相机」。于是「换相机」这件事**在数据上不可见**：文件还是那个文件、程序
+        照读不误，换一台**同分辨率**的相机就静默沿用旧内参，距离系统性错而界面
+        零提示（相机自带的 ``_tune_if_needed()`` 还会把画面调回 640x480，让尺寸
+        凑巧对上，把问题盖得更严实）。
+
+        现在分三步：① 认设备 → ② 按设备指纹查档案库 → ③ 判定用不用。
+        判定规则在 ``core.camera_profiles.decide_calibration``（纯函数，可单测）。
+
+        没有标定不是错误 —— 只是测距不可用：这里只记录原因，不阻塞启动，
+        UI 会明确显示「本设备未标定」，而不是静默给一个假距离。
         """
         path = self.global_params.calib_path
         if not os.path.isabs(path):
             # 相对仓库根解析，避免工作目录变化导致找不到
             path = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
         self._calib_file = path
+        # 安装参数（外参）与内参**同目录、分开存**：两者生命周期不同（内参跟相机走、
+        # 安装参数跟机位走），合并会让「重标内参」把安装参数一起冲掉
+        self._mount_file = os.path.join(os.path.dirname(path), 'mount.json')
+        # 内参档案库：一台相机一条记录（与 calib.json 同目录，便于一起备份）
+        self._cam_store_path = cam_profiles.default_store_path(path)
+        self._cam_store = cam_profiles.load_store(self._cam_store_path)
+        print(f'[设备] 标定档案库 {self._cam_store_path}：'
+              f"{len(self._cam_store.get('devices', {}))} 台设备的记录")
+        # 旧的单文件标定：仍要读（老用户机器上只有它），但**不再直接生效**
+        self._legacy_intrinsics = CameraCalibrator.load(path)
+        # 认设备，并据此决定用哪份内参
+        self._scan_camera_devices()
 
-        intr = CameraCalibrator.load(path)
-        if intr is None:
-            self.global_params.intrinsics = None
-            self.global_params.calibrated = False
-            self.global_params.invalid_reason = '未找到标定文件'
+    # ------------------------------------------------------------------
+    # 摄像头设备识别：像蓝牙那样「记住每台设备」
+    # ------------------------------------------------------------------
+
+    def _scan_camera_devices(self):
+        """枚举本机摄像头，并据此决定用哪份内参。
+
+        快通路同步、慢通路异步
+        -------------------
+        Windows 主通路读注册表，实测 **1.4 ms**（``probe_identity_routes.py``），
+        同步跑毫无存在感；兜底通路要调 PowerShell，实测 **4.9~6.8 s**，
+        同步跑就是"开窗即卡几秒"。所以后者必须丢进 ``DeviceIdentifyThread``。
+        """
+        rep = enumerate_cameras(allow_slow_fallback=False)
+        if rep.devices or not rep.error:
+            # 有设备；或者「通路正常但本机确实没有摄像头」—— 都不需要慢查询
+            self._apply_identity(rep)
             return
+        # 注册表没结果：可能只是这条通路不可用（而不是真的没插相机）
+        print(f'[设备] 注册表通路无结果（{rep.error or "无设备"}），转后台兜底查询')
+        if self._identify_thread is not None and self._identify_thread.isRunning():
+            return
+        if hasattr(self, 'label_camera_status'):
+            self.label_camera_status.setText(
+                '正在识别摄像头……\n'
+                '本机的注册表通路没读到设备，正在用备用通路查询（约需几秒）。')
+        self._identify_thread = DeviceIdentifyThread(self)
+        self._identify_thread.identified.connect(self._apply_identity)
+        self._identify_thread.start()
 
-        self.global_params.intrinsics = intr
-        self.global_params.calibrated = intr.is_valid()
-        if intr.is_valid():
-            self.global_params.invalid_reason = ''
-            self.ranger.update_intrinsics(intr)
+    @Slot(object)
+    def _apply_identity(self, rep):
+        """拿到设备列表后：判定「现在用的是哪台」，再更新界面与内参。"""
+        self._identity_report = rep
+        chosen = self._chosen_fingerprint()
+        act = resolve_active_device(rep,
+                                    remembered=self._cam_store.get('active', ''),
+                                    chosen=chosen)
+        self._cam_active = act
+        print(f'[设备] {rep.summary()} | 判定 {act.confidence}：{act.reason}')
+        self.refresh_camera_widgets()
+        self.apply_calibration_decision()
+
+    def apply_calibration_decision(self, frame_size=None):
+        """决定这次用哪份内参，并把结论落到测距器与界面。
+
+        ``frame_size`` 未知（相机还没打开）时**跳过分辨率比对**，等
+        ``on_camera_init_finished`` 拿到真实画面尺寸再复核一次
+        （见 ``verify_calibration_against_frame``）。
+        """
+        act = getattr(self, '_cam_active', None)
+        dev = act.device if act else None
+        fp = dev.fingerprint if dev else ''
+        # 旧标定文件上盖的设备戳：用来拦住「给相机 A 标完、插上同分辨率的相机 B
+        # 仍照读旧文件」这个漏洞。**每次现读**而不是缓存 —— 盖戳发生在标定完成与
+        # 手动绑定之后，缓存一旦忘了同步就会让这道闸门失效。
+        stamped = cam_profiles.read_stamped_device(getattr(self, '_calib_file', ''))
+        d = cam_profiles.decide_calibration(
+            self._cam_store, fp, legacy=self._legacy_intrinsics,
+            frame_size=frame_size, identity_known=bool(fp),
+            legacy_device=stamped)
+        self._cam_decision = d
+
+        self.global_params.intrinsics = d.intrinsics
+        self.global_params.calibrated = bool(d.usable)
+        self.global_params.invalid_reason = ('' if d.usable
+                                             else (d.blocked_reason or d.status))
+        # ⚠️ 测距器**绝不能注入 None**：on_detection_ready 会无条件调它。
+        # 不可用时注入「无效内参」（calibrated=False），各方法会自然返回
+        # None / 明确原因，而不是崩在 None.is_valid() 上。
+        self.ranger.update_intrinsics(d.intrinsics if d.usable
+                                      else CameraIntrinsics())
+        self.refresh_distance_widgets()
+        self.refresh_calib_widgets()
+        # ⚠️ 必须连设备状态标签一起刷：判定可能在「相机打开后复核」时被改写
+        # （例如分辨率此时才发现不符）。少了这一步，界面会停留在上一轮的文案上
+        # —— 显示「已标定」而实际已拒用，是典型的"看着正常、其实不一致"。
+        self.refresh_camera_widgets()
+
+        if d.usable:
             self.status_bar.showMessage(
-                f'已加载相机内参 fx={intr.fx:.1f} fy={intr.fy:.1f} '
-                f'重投影误差={intr.rms_error:.3f}px', 5000)
-            print(f'[标定] 加载 {path}  fx={intr.fx:.2f} fy={intr.fy:.2f} '
-                  f'rms={intr.rms_error:.4f} size={intr.image_size}')
+                f'内参已就绪（{d.status}）：fx={d.intrinsics.fx:.1f} '
+                f'rms={d.intrinsics.rms_error:.3f}px', 6000)
         else:
-            self.global_params.invalid_reason = '标定文件内容无效'
+            self.status_bar.showMessage(f'测距不可用：{d.status}', 10000)
+        self._maybe_prompt_calibration()
+        return d
+
+    def verify_calibration_against_frame(self):
+        """相机打开后，用**真实画面尺寸**复核一次内参判定。
+
+        为什么必须复核：启动时相机可能还没打开，拿不到画面尺寸，只能跳过分辨率
+        校验；而「标定分辨率 ≠ 当前分辨率」恰恰是要拦的那类静默错误 —— 内参随
+        分辨率变化，套用会让距离整体偏。所以拿到尺寸后必须再判一次。
+        """
+        size = self._frame_size()
+        if size is None:
+            return
+        d = self.apply_calibration_decision(frame_size=size)
+        print(f'[设备] 画面 {size[0]}x{size[1]}，内参判定：{d.status}')
+        if not d.usable and d.blocked_reason:
+            self.status_bar.showMessage(f'测距不可用：{d.blocked_reason}', 15000)
+
+    def _frame_size(self):
+        """当前摄像头的实际画面尺寸；拿不到返回 None（不猜）。"""
+        cap = getattr(self, 'cap', None)
+        if cap is None:
+            return None
+        try:
+            if not cap.isOpened():
+                return None
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        except Exception:                                        # noqa: BLE001
+            return None
+        return (w, h) if w > 0 and h > 0 else None
+
+    def _chosen_fingerprint(self) -> str:
+        """用户在下拉框里指明过的设备指纹；没指明过返回空串。"""
+        combo = getattr(self, 'combo_camera_device', None)
+        if combo is None:
+            return ''
+        return str(combo.currentData() or '')
+
+    def refresh_camera_widgets(self):
+        """把「本机摄像头」与「本设备的标定状态」刷到设置页。
+
+        ⚠️ 下拉框的语义必须说准：程序固定打开**索引 0**，所以选中项表达的是
+        「我确认索引 0 就是这台」，而不是「选一下就能换相机」—— Windows 上取不到
+        索引与设备名的对应关系（见 ``core/camera/device_identity.py`` 的说明）。
+        让人误以为能切设备，比不提供这个控件更糟，所以文案里写清楚。
+        """
+        combo = getattr(self, 'combo_camera_device', None)
+        label = getattr(self, 'label_camera_status', None)
+        if combo is None or label is None:
+            return
+        rep = self._identity_report
+        act = getattr(self, '_cam_active', None)
+
+        self._loading_device = True
+        try:
+            combo.clear()
+            if rep is None:
+                combo.addItem('正在识别……', '')
+            elif not rep.devices:
+                combo.addItem('未检测到摄像头设备', '')
+            else:
+                for dv in rep.devices:
+                    combo.addItem(dv.label(), dv.fingerprint)
+                want = act.device.fingerprint if (act and act.device) else ''
+                i = combo.findData(want)
+                if i >= 0:
+                    combo.setCurrentIndex(i)
+        finally:
+            self._loading_device = False
+
+        lines = []
+        if rep is None:
+            lines.append('正在识别摄像头……')
+        else:
+            lines.append(rep.summary())
+            if act is not None and act.device is not None:
+                mark = '✓' if act.certain else '⚠'
+                lines.append(f'{mark} 程序正在使用的设备：{act.device.name}'
+                             f'（{act.reason}）')
+                if not act.certain:
+                    lines.append('　请在上面的下拉框里指明程序用的是哪一台，'
+                                 '之后会记住。')
+            elif act is not None:
+                lines.append(f'⚠ {act.reason}')
+
+        d = getattr(self, '_cam_decision', None)
+        if d is not None:
+            lines.append('')
+            lines.append(f'标定：{d.status}')
+            lines.append(d.detail)
+        label.setText('\n'.join(lines))
+
+        bind = getattr(self, 'btn_camera_bind', None)
+        if bind is not None:
+            bind.setEnabled(bool(d is not None and d.can_bind_legacy))
+
+    @Slot(int)
+    def on_camera_device_chosen(self, index):
+        """用户在下拉框里指明了「程序正在用的那一台」。"""
+        if getattr(self, '_loading_device', False):
+            return                        # 程序回填，不是用户操作
+        fp = str(self.combo_camera_device.itemData(index) or '')
+        if not fp:
+            return
+        if self._cam_store.get('active', '') != fp:
+            cam_profiles.set_active(self._cam_store, fp)
+            self._persist_camera_store()
+        rep = self._identity_report or IdentityReport()
+        self._cam_active = resolve_active_device(
+            rep, remembered=self._cam_store.get('active', ''), chosen=fp)
+        print(f'[设备] 用户指定：{self._cam_active.reason}')
+        self.refresh_camera_widgets()
+        self.apply_calibration_decision(self._frame_size())
+
+    @Slot()
+    def on_rescan_camera_clicked(self):
+        """重新枚举一次（插拔设备后用）。快通路是毫秒级的，点它不用等。"""
+        self.status_bar.showMessage('正在重新检测摄像头设备……', 3000)
+        self._scan_camera_devices()
+
+    @Slot()
+    def on_bind_camera_clicked(self):
+        """把当前已加载的旧标定认到本设备名下。
+
+        场景：老用户机器上只有一个 ``calib.json``（未绑定任何设备）。重标一次
+        当然最干净，但"我确定就是这台相机、不想重标"是合理诉求 —— 那就让这句话
+        变成一个**明确的动作**，而不是靠程序默认猜。所以这里要用户主动确认，
+        并且**分辨率对不上就拒绝绑定**（绑了也是在给自己埋雷）。
+        """
+        act = getattr(self, '_cam_active', None)
+        dev = act.device if act else None
+        if dev is None or not dev.fingerprint:
+            self._warn('绑定标定', '还认不出本机摄像头是哪一台，无法绑定。\n'
+                                   '请先点「重新检测设备」。')
+            return
+        intr = self._legacy_intrinsics
+        if intr is None or not intr.is_valid():
+            self._warn('绑定标定', '当前没有可用的标定文件，请先标定一次。')
+            return
+        size = self._frame_size()
+        if size is not None and tuple(intr.image_size) != tuple(size):
+            self._warn('绑定标定',
+                       f'这份标定是按 {intr.image_size[0]}x{intr.image_size[1]} 做的，'
+                       f'当前画面是 {size[0]}x{size[1]}，分辨率不一致，不能绑定。\n'
+                       f'请对当前相机重新标定一次。')
+            return
+        try:
+            cam_profiles.upsert_profile(
+                self._cam_store, dev.fingerprint,
+                cam_profiles.profile_from_intrinsics(dev, intr,
+                                                     note='由旧标定文件绑定'))
+            self._persist_camera_store()
+            # 同 on_calib_solved：绑定也要给旧文件盖戳。否则用户"绑定"完这台，
+            # 之后插上另一台同分辨率相机时，旧文件仍是"无主的"，判定又会走
+            # 「暂用未绑定文件」——等于白绑一次。
+            cam_profiles.stamp_device(self._calib_file, dev.fingerprint)
+        except OSError as e:
+            self._warn('绑定标定', f'写入档案库失败：{e}')
+            return
+        self.refresh_camera_widgets()
+        self.apply_calibration_decision(size)
+        self._info('绑定标定',
+                   f'已把当前标定绑定到「{dev.name}」。\n\n'
+                   f'以后插别的相机不会再用到这份内参；插回这台则自动可用。')
+
+    def _persist_camera_store(self):
+        """档案库落盘。失败只降级（本次仍生效），不阻断使用。"""
+        path = getattr(self, '_cam_store_path', None)
+        if not path:
+            return
+        try:
+            cam_profiles.save_store(path, self._cam_store)
+        except OSError as e:
+            self.status_bar.showMessage(
+                f'标定档案保存失败：{e}（本次仍已生效）', 8000)
+
+    def _maybe_prompt_calibration(self):
+        """没有可用标定时提醒标定 —— 每轮启动只弹一次。"""
+        d = getattr(self, '_cam_decision', None)
+        if d is None or d.usable or self._calib_prompted:
+            return
+        self._calib_prompted = True
+        act = getattr(self, '_cam_active', None)
+        name = act.device.name if (act and act.device) else '本机摄像头'
+        # 延迟到事件循环：构造期间弹模态框会挡在窗口显示之前，观感很差
+        QTimer.singleShot(0, lambda: self._notify_calibration_needed(name, d))
+
+    def _notify_calibration_needed(self, name, decision):
+        self._warn(
+            '需要标定相机',
+            f'这台相机（{name}）还没有可用的内参，测距不可用'
+            f'（程序不会给出猜测值）。\n\n'
+            f'原因：{decision.status}\n\n'
+            f'要做什么：切到「设置」页 →「相机标定」→ 把棋盘格放进画面 →\n'
+            f'点「开始采集」（采够 10 帧）→ 点「求解并保存」。\n\n'
+            f'标定一次即可：结果会按这台设备记住，以后插回来直接可用。')
+
+    def _warn(self, title, text):
+        """统一的警告弹窗出口 —— 便于自动化验证时替换掉阻塞式对话框。"""
+        QMessageBox.warning(self, title, text)
+
+    def _info(self, title, text):
+        QMessageBox.information(self, title, text)
+
+
+    def load_mount_params_ui(self):
+        """把落盘的安装参数（相机高度 + 俯仰角）回填到设置页，并立即生效。
+
+        为什么要有这一步
+        ---------------
+        安装参数原先只活在内存里（``GlobalParams``）：自标定解出来只写进控件，
+        程序一关就没了 —— 下次启动得重解一遍。开发者本机不容易察觉（每次都现场
+        标），但换台机器、换个人用，就变成「棋盘标完还得再搞一次」，而它本来
+        只需要做一次。内参有 ``models/calib.json``，安装参数同样该有。
+
+        回填走**与手工填写同一条通路**（``setValue`` -> ``valueChanged`` ->
+        重建 ``RangingConfig``），所以没有额外的「应用」按钮；``_loading_mount``
+        在此期间挡住落盘，避免把「加载」当成「用户改动」再写一次。
+
+        ⚠️ 但那条通路**在本函数被调用时还没接通**：``init_ui()`` 跑在
+        ``bind_calibration_widgets()`` **之前**，此刻 ``valueChanged`` 还没有
+        连到槽函数 —— 只 ``setValue`` 会得到一个**控件显示对了、而
+        ``global_params`` 还是 0** 的静默失效（实测踩到：界面显示 1.20 m，
+        测距侧仍认为「未填安装高度」，接触点法直接不可用）。
+        所以下面除了 ``setValue``，还**显式同步一次** global_params 与 ranger。
+        """
+        path = getattr(self, '_mount_file', None)
+        if not path:
+            return
+        data = load_mount_params(path)
+        if not data:
+            return
+        self._loading_mount = True
+        try:
+            self.spin_camera_height.setValue(float(data['camera_height']))
+            self.spin_pitch_deg.setValue(float(data['pitch_deg']))
+        finally:
+            self._loading_mount = False
+        h = float(self.spin_camera_height.value())
+        p = float(self.spin_pitch_deg.value())
+
+        # 显式生效（不能依赖 valueChanged —— 见上面的 ⚠️）。三步与
+        # on_pitch_changed / on_camera_height_changed 保持完全一致，
+        # 保证「加载出来的」与「手工填的」走到同一个内部状态。
+        self.global_params.camera_height = h
+        self.global_params.pitch_deg = p
+        self.ranger.update_config(RangingConfig.from_params(self.global_params))
+        self.refresh_distance_widgets()
+
+        src = data.get('source') or '已保存'
+        when = data.get('saved_at') or '—'
+        self.status_bar.showMessage(
+            f'已加载安装参数：相机高度 {h:.2f} m、俯仰角 {p:.1f}°'
+            f'（{src} @ {when}）', 6000)
+        print(f'[安装参数] 加载 {path}  H={h:.2f} m  θ={p:.1f}°  '
+              f'source={src} saved_at={when}')
+
+    def _persist_mount_params(self, source: str):
+        """把当前控件的安装参数落盘。
+
+        取**控件值**而不是 ``global_params``：控件精度（高度 2 位、俯仰角 1 位）
+        才是实际生效的值，存下来才能与「下次启动看到的数」一致 —— 否则会出现
+        「存的是 1.2365、显示的是 1.24」这类对不上的情况。
+
+        落盘失败**不阻断测距**：参数已在内存中生效，只是下次要重填，属于降级而非故障。
+        """
+        if getattr(self, '_loading_mount', False):
+            return
+        path = getattr(self, '_mount_file', None)
+        if not path:
+            return
+        try:
+            save_mount_params(path, self.spin_camera_height.value(),
+                              self.spin_pitch_deg.value(), source=source)
+        except OSError as e:
+            self.status_bar.showMessage(f'安装参数保存失败：{e}（本次仍已生效）', 8000)
 
     def refresh_calib_widgets(self):
         """把标定状态同步到设置页。
@@ -551,14 +981,40 @@ class MainWindow(QWidget, Ui_Form):
             QMessageBox.critical(self, '标定失败', f'标定文件写入失败：{e}')
             return
 
-        # 求解成功后立即生效，不必重启
-        self.global_params.intrinsics = intr
-        self.global_params.calibrated = intr.is_valid()
-        self.global_params.invalid_reason = ''
-        self.ranger.update_intrinsics(intr)
+        # 同时按**设备**记一份 —— 这是「换相机自动认出来」的关键一步。
+        # 只写 calib.json 的话，下次插上另一台相机仍会照读这份内参。
+        act = getattr(self, '_cam_active', None)
+        dev = act.device if act else None
+        bound = bool(dev is not None and dev.fingerprint)
+        bind_note = ''
+        if bound:
+            try:
+                cam_profiles.upsert_profile(
+                    self._cam_store, dev.fingerprint,
+                    cam_profiles.profile_from_intrinsics(dev, intr, note='本机标定'))
+                self._persist_camera_store()
+                # 顺手给 calib.json 盖个设备戳。旧程序读它时会被忽略（
+                # CameraCalibrator.load 只取 dataclass 里有的字段），所以对
+                # 树莓派端与旧版无害；但新版本据此能拦住最顽固的一种误用：
+                # 给相机 A 标完，插上**另一台同分辨率**的相机 B —— 没有戳时
+                # 判定只能含糊地"暂用旧文件"，有了戳就能明确拒用。
+                cam_profiles.stamp_device(self._calib_file, dev.fingerprint)
+                bind_note = (f'\n\n已按设备记住：{dev.name}\n'
+                             f'（指纹 {dev.fingerprint}）\n'
+                             f'以后插别的相机不会误用这份内参。')
+                print(f'[设备] 标定已绑定到 {dev.name} / {dev.fingerprint}')
+            except OSError as e:
+                bind_note = f'\n\n⚠️ 按设备保存失败：{e}（文件版标定仍已保存）'
+                self.status_bar.showMessage(f'按设备保存失败：{e}', 8000)
+        else:
+            bind_note = ('\n\n⚠️ 没能识别出本机摄像头，这份标定**无法按设备记住**，'
+                         '换相机时可能被误用。请点「重新检测设备」后再标一次。')
+
+        # 求解成功后立即生效，不必重启；统一走判定函数（单一出口，避免两处各写一份状态）
+        self._legacy_intrinsics = intr
         self.calibrator = None            # 成功后清空：下次「开始采集」是全新一轮
         self._set_collecting(False)
-        self.refresh_calib_widgets()
+        self.apply_calibration_decision(self._frame_size())
 
         w, h = intr.image_size
         warns = []
@@ -579,7 +1035,7 @@ class MainWindow(QWidget, Ui_Form):
         detail = (f'内参已保存到：\n{self._calib_file}\n\n'
                   f'fx={intr.fx:.1f}  fy={intr.fy:.1f}\n'
                   f'cx={intr.cx:.1f}  cy={intr.cy:.1f}\n'
-                  f'重投影误差={intr.rms_error:.3f} px')
+                  f'重投影误差={intr.rms_error:.3f} px' + bind_note)
 
         if warns:
             QMessageBox.warning(
@@ -597,6 +1053,7 @@ class MainWindow(QWidget, Ui_Form):
         """俯仰角改了立即重建测距配置 —— 不需要重标定。"""
         self.global_params.pitch_deg = float(value)
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
+        self._persist_mount_params('手工填写')
 
     @Slot()
     def on_camera_height_changed(self, value):
@@ -608,7 +1065,8 @@ class MainWindow(QWidget, Ui_Form):
         """
         self.global_params.camera_height = float(value)
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
-        self.label_distance_value.setToolTip(self._ranging_tooltip())
+        self.refresh_distance_widgets()
+        self._persist_mount_params('手工填写')
 
     def _ranging_tooltip(self, res=None):
         """距离读数的悬停说明。
@@ -632,6 +1090,38 @@ class MainWindow(QWidget, Ui_Form):
                 f'10 m 处每 1° 的俯仰角误差约带来 {sens:.0f}% 距离误差'
                 f'（装得越高越不敏感）。\n'
                 f'高度与俯仰角都可由「安装参数自标定」反解，不必手工量。')
+
+    def refresh_distance_widgets(self, res=None):
+        """把距离读数的**悬停说明**与**界面上那行原因**成对刷新。
+
+        为什么要成对：悬停要鼠标停上去才看得见，而"为什么不可测"是用户
+        当下就要知道的信息 —— 实测有人因为只看到「不可测」而怀疑是自己
+        模型选错了。两者都从同一份 ``RangingResult`` 取，**同源**才不会
+        一个说 A、一个说 B（显示与判定不同源，之前在设备状态标签上踩过一次）。
+        """
+        self.label_distance_value.setToolTip(self._ranging_tooltip(res))
+        self.label_distance_reason.setText(self._ranging_reason_text(res))
+
+    def _ranging_reason_text(self, res=None) -> str:
+        """距离读数下面那行小字：把「为什么」直接摆在界面上，而不是只藏在悬停里。
+
+        三层，与 ``_ranging_tooltip`` 同源：
+
+        ① **内参不可用**（没标定 / 分辨率不符 / 属于另一台相机）—— 这是最根本
+           的一条，任何目标都测不了，所以优先显示，并指向「设置」页；
+        ② **本帧目标自己的原因**（``RangingResult.reason``）—— 「脚被画面下边界
+           裁掉（目标太近）」「框底边落在相机水平线以上，不可能踩在地面上」等；
+        ③ **正常出数** —— 报出所用方法，让人知道这个数是靠哪条路给的
+           （接触点法靠脚，高度法靠全身框 + 登记身高）。
+        """
+        if not self.global_params.calibrated:
+            why = self.global_params.invalid_reason or '未标定'
+            return f'{why} —— 内参不可用，测距已停（见「设置」页）'
+        if res is not None and res.reason:
+            return res.reason
+        if res is not None and res.distance is not None:
+            return f'（{res.method}）'
+        return ''
 
     # ------------------------------------------------------------------
     # 安装参数自标定（外参：相机安装高度 + 俯仰角）
@@ -757,7 +1247,10 @@ class MainWindow(QWidget, Ui_Form):
         self.global_params.camera_height = h_applied
         self.global_params.pitch_deg = pitch_applied
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
-        self.label_distance_value.setToolTip(self._ranging_tooltip())
+        self.refresh_distance_widgets()
+        # 落盘。上面两个 setValue 已经各自触发过一次落盘（来源会被记成「手工填写」），
+        # 这里再用正确来源覆盖写一次 —— 文件很小，一次多余写入换来源标注准确，划算。
+        self._persist_mount_params('自标定')
 
         sens = (0.01745 * 10.0 / h_applied * sol.sigma_pitch * 100.0
                 if h_applied > 0 else float('nan'))
@@ -830,6 +1323,7 @@ class MainWindow(QWidget, Ui_Form):
             self.label_rec_status.setText('空闲')
             return
 
+        session_dir = self.recorder.session_dir
         self.recorder = None
         self.btn_rec_toggle.setText('开始录制')
         self.label_rec_status.setText('空闲')
@@ -842,7 +1336,7 @@ class MainWindow(QWidget, Ui_Form):
             warn += '\n⚠ 录制时未标定，本次数据轨的距离值全部为 None'
 
         self.label_rec_info.setText(
-            f'已保存：{self.recorder.session_dir if self.recorder else ""}\n'
+            f'已保存：\n{session_dir}\n'
             f'时长 {meta.duration_s:.1f}s，视频 {meta.frame_count} 帧，'
             f'数据轨 {meta.data_count} 条{warn}'
         )
@@ -853,6 +1347,10 @@ class MainWindow(QWidget, Ui_Form):
             f'数据轨记录 {meta.data_count}\n'
             f'丢帧 {meta.dropped_frames}{warn}'
         )
+        # 录完自动挂到回放器上 —— 之前要手动再点「选择录制」，容易以为没存上
+        if self._load_replay_session(session_dir):
+            self.status_bar.showMessage(
+                f'录制完成，已自动加载回放：{meta.session}', 5000)
 
     def _recordings_dir(self) -> str:
         """录制根目录固定在仓库下 recordings/（已在 .gitignore 中）。"""
@@ -863,30 +1361,59 @@ class MainWindow(QWidget, Ui_Form):
 
     @Slot()
     def on_play_pick(self):
-        """选择一次录制。优先弹目录选择，列出 recordings 下已存在的会话。"""
+        """选择一次录制：列出现有会话（带摘要）让用户挑，不再浏览目录。
+
+        旧版用目录选择框 —— 用户容易选到 recordings 根目录（没有
+        video.avi，加载失败），或者不知道要进哪个目录。列表直接给摘要。
+        """
         root = self._recordings_dir()
         sessions = Replayer.list_sessions(root)
         if not sessions:
             QMessageBox.information(self, '没有录制',
                                     f'{root} 下没有找到录制（需含 video.avi）。')
             return
-        d = QFileDialog.getExistingDirectory(
-            self, '选择录制目录', sessions[-1],
-            QFileDialog.Option.ShowDirsOnly)
-        if not d:
+
+        items = []
+        for d in sessions:
+            try:
+                rp = Replayer(d)
+                m = rp.meta
+                items.append(f'{m.session}  ·  {m.duration_s:.0f}s · '
+                             f'{m.frame_count} 帧 · 数据 {len(rp.records)} 条'
+                             + ('  ⚠ 丢帧' if m.dropped_frames else ''))
+            except Exception:                                  # noqa: BLE001
+                items.append(os.path.basename(d))
+
+        choice, ok = QInputDialog.getItem(
+            self, '选择录制', '选中要回放的录制：', items, len(items) - 1,
+            False)
+        if not ok:
             return
+        d = sessions[items.index(choice)]
+        if self._load_replay_session(d):
+            self.status_bar.showMessage(
+                f'已加载录制：{self.replayer.meta.session}', 3000)
+
+    def _load_replay_session(self, session_dir: str) -> bool:
+        """把一个录制会话挂到回放器上。失败弹窗说明原因并返回 False。
+
+        失败时保留之前已加载的会话（换片失败不应该把手头的片也弄丢）。
+        """
+        # 回放中直接换片：先停定时器，避免旧定时器继续驱动
+        if self.replay_timer is not None and self.replay_timer.isActive():
+            self.replay_timer.stop()
+            self.btn_play_toggle.setText('播放')
+        if not self.camera_timer.isActive():
+            self.camera_timer.start()
         try:
-            self.replayer = Replayer(d)
+            replayer = Replayer(session_dir)
         except Exception as e:
             QMessageBox.critical(self, '加载失败', f'无法读取录制：{e}')
-            self.replayer = None
-            return
-
-        if not self.replayer.open():
+            return False
+        if not replayer.open():
             QMessageBox.critical(self, '加载失败', 'video.avi 无法打开。')
-            self.replayer = None
-            return
-
+            return False
+        self.replayer = replayer
         self.play_index = 0
         total = self.replayer.total_frames
         self.label_play_pos.setText(f'0/{total}')
@@ -898,7 +1425,7 @@ class MainWindow(QWidget, Ui_Form):
             f'丢帧 {self.replayer.meta.dropped_frames}'
         )
         self.show_replay_summary()
-        self.status_bar.showMessage(f'已加载录制：{self.replayer.meta.session}', 3000)
+        return True
 
     @Slot()
     def on_play_toggle(self):
@@ -1092,6 +1619,7 @@ class MainWindow(QWidget, Ui_Form):
                 self.analysis_timer.start()
         elif currebt_tab=='设置':
             self.refresh_calib_widgets()
+            self.refresh_camera_widgets()
         elif currebt_tab=='录制回放':
             if self.replayer is not None:
                 self.show_replay_summary()
@@ -1142,6 +1670,82 @@ class MainWindow(QWidget, Ui_Form):
         self.QPuahButton_calibrate_status.setEnabled(True)
         QMessageBox.information(self,'参数已应用','运行参数已更新并生效')
         self.refresh_calib_widgets()   # 标定状态回到真实值，而不是被这里改写
+
+    # ------------------------------------------------------------------
+    # 默认模型 / 上次选择（models/settings.json，已 gitignore）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _model_settings_path() -> str:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'models', 'settings.json')
+
+    # Windows 端实测最佳的默认组合（README 横评：43~47 ms/帧）
+    DEFAULT_MODEL = os.path.join('models', 'yolov8', 'yolov8n.onnx')
+    DEFAULT_LABELS = os.path.join('models', 'labels', 'coco80.txt')
+
+    def _resolve_model_paths(self):
+        """决定启动时用哪套模型路径：上次的选择 > 默认最佳 > 空。
+
+        上次的选择记录在 models/settings.json（点「应用参数」成功后写入）；
+        文件已不存在时视为失效，退回默认。
+        """
+        base = os.path.dirname(os.path.abspath(__file__))
+        default_model = os.path.normpath(
+            os.path.join(base, self.DEFAULT_MODEL))
+        default_labels = os.path.normpath(
+            os.path.join(base, self.DEFAULT_LABELS))
+
+        last_model, last_labels = '', ''
+        try:
+            with open(self._model_settings_path(), 'r',
+                      encoding='utf-8') as f:
+                data = json.load(f)
+            last_model = data.get('model_path', '')
+            last_labels = data.get('label_path', '')
+        except (OSError, ValueError):
+            pass
+        if not os.path.isfile(last_model):
+            last_model = ''
+        if not os.path.isfile(last_labels):
+            last_labels = ''
+
+        model = last_model or (default_model if os.path.isfile(default_model)
+                               else '')
+        labels = last_labels or (default_labels if os.path.isfile(default_labels)
+                                else '')
+        return model, labels, bool(last_model)   # (路径, 标签, 来自上次选择)
+
+    def _apply_default_model_paths(self):
+        """启动时把模型路径填进参数与控件 —— 让「打开就能用」成为默认行为。"""
+        model, labels, from_last = self._resolve_model_paths()
+        if model:
+            self.global_params.mode_path = model
+            self.label_model_path.setText(model)
+        if labels:
+            self.global_params.label_path = labels
+            self.label_label_path.setText(labels)
+        if model:
+            where = '上次选择' if from_last else '默认模型'
+            self.status_bar.showMessage(
+                f'使用{where}：{os.path.basename(model)}（后台加载中）', 5000)
+
+    def _save_model_settings(self):
+        """记住这次生效的模型组合，下次启动直接用（不用再选）。"""
+        data = {
+            'model_path': self.global_params.mode_path,
+            'label_path': self.global_params.label_path,
+            'saved_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+        }
+        try:
+            os.makedirs(os.path.dirname(self._model_settings_path()),
+                        exist_ok=True)
+            tmp = self._model_settings_path() + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self._model_settings_path())
+        except OSError as e:
+            print(f'模型设置落盘失败（不影响本次使用）：{e}')
 
     @Slot()        
     def on_model_browse(self):
@@ -1236,7 +1840,8 @@ class MainWindow(QWidget, Ui_Form):
         # 实时距离读数（监视页「目标位置」分组，CHARTER 门槛判据）
         # display() 在存疑时给 "5.00 m？"、不可测时给 "不可测"，都不隐藏数据
         self.label_distance_value.setText(res.display() if res is not None else '不可测')
-        self.label_distance_value.setToolTip(self._ranging_tooltip(res))
+        # 悬停说明 + 界面上那行「为什么」一起刷（同源，见 refresh_distance_widgets）
+        self.refresh_distance_widgets(res)
 
         # 安装参数自标定：采样窗口内收集「框底边像素」（只收真的检测到目标的帧）。
         # 底边像素是自标定的观测量，它的随机误差直接进解算 —— 所以取一段窗口
@@ -1360,6 +1965,14 @@ class MainWindow(QWidget, Ui_Form):
                 pass
             print('[标定] 关闭时等待求解线程结束……')
             th.wait()
+        # 设备枚举线程（兜底通路走 PowerShell，可能正卡在几秒的查询上）
+        it = getattr(self, '_identify_thread', None)
+        if it is not None and it.isRunning():
+            try:
+                it.identified.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            it.wait(3000)
         # 模型加载线程同理（在子线程里建 ORT 会话）
         mt = getattr(self, 'model_thread', None)
         if mt is not None and mt.isRunning():

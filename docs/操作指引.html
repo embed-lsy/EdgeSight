@@ -83,7 +83,35 @@
 
 <h2>2 · 相机标定（约 10 分钟）</h2>
 <ol>
-  <li>启动软件（运行仓库里的 <span class="file">main_windows.py</span>），摄像头自动打开，「监视」页有画面。</li>
+  <li>启动软件（运行仓库里的 <span class="file">main_windows.py</span>），摄像头自动打开，「监视」页有画面。
+    <div class="box ok-box">
+      <strong>模型会自动加载，不用手动选</strong> —— 启动即用 Windows 端实测最佳的
+      yolov8n + coco80 组合，看一眼状态栏确认「AI模型加载并初始化成功」即可。<br>
+      <span class="meta">（想换模型才需要动手：浏览选新模型 → 点「应用参数」，程序会记住你换的这套。）</span>
+      <ol>
+        <li>切到 <strong>「设置」页</strong>，找到 <strong>「模型配置」</strong> 那一组。</li>
+        <li>启动软件后<strong>模型已自动加载</strong>：程序会默认用
+          <span class="file">models/yolov8/yolov8n.onnx</span> +
+          <span class="file">models/labels/coco80.txt</span>（Windows 端实测最佳组合，
+          README 实测 43~47 ms/帧、<strong>21~23 FPS</strong>），路径已显示在
+          「模型配置」的两个框里，<strong>状态栏出现「AI模型加载并初始化成功」即可</strong>。<br>
+          <span class="meta">想换模型：点「浏览」选新的 → 点
+          <span class="kbd">应用参数</span>（<strong>浏览只改路径，点应用才加载</strong>，
+          加载在后台，界面不卡）。程序会记住你上次用的组合，
+          <strong>下次启动直接加载</strong>，不用重选。
+          可选的有 <span class="file">models/yolov5/</span> 与
+          <span class="file">models/yolov8/</span> 下的 ONNX
+          （按路径里的 <code>yolov5</code> / <code>yolov8</code> 字样决定后处理）；
+          别选 <span class="file">.pt</span>（训练权重，程序读不了）、
+          <span class="file">yolov8n_int8.onnx</span>（实测比 fp32 还慢）。
+          想要中文类别名就换标签 <span class="file">coco_labels_cn.txt</span>
+          （中文名要和「指定类别」下拉框里的名字对得上）。</span></li>
+      </ol>
+      <strong>怎么判断加载好了</strong>：人站到画面里，「监视」页能看到框，框上写着类别名（如 person）。
+      <strong>一个框都没有，先看状态栏有没有「AI模型加载并初始化成功」</strong> ——
+      这跟测距没关系，先去把框弄出来。
+    </div>
+  </li>
   <li>切到 <strong>「设置」页</strong>：
     <ul>
       <li>棋盘格内角点：保持 <span class="kbd">9 × 6</span>（默认就是，不用动）</li>
@@ -120,8 +148,58 @@
   </li>
 </ol>
 
+<div class="box">
+  <strong>标定结果是"按相机记住"的（2026-09-24 起）</strong>：程序能认出这台摄像头（像蓝牙配对那样记住设备），
+  标定一次以后插回来直接可用；<strong>换了别的相机不会拿错内参</strong>，会明确提醒重新标定。<br><br>
+  所以「设置 → 相机标定」顶部多了一栏 <strong>「本机摄像头」</strong>，看它就知道当前这台相机的标定状态：
+  <table>
+    <tr><th>显示的状态</th><th>什么意思</th><th>要不要动</th></tr>
+    <tr><td>已标定（本设备）</td><td>这台相机有自己的一份标定，且分辨率对得上</td><td>不用管，正常用</td></tr>
+    <tr><td>沿用旧标定文件（未绑定设备）</td><td>标定能用，但还不知道"属于哪台相机"（老版程序留下的文件）</td><td>确认就是这台相机标的，就点 <span class="kbd">绑定到本设备</span>；不确定就重标一次</td></tr>
+    <tr><td>本设备未标定</td><td>这台相机第一次用，或者换了新相机</td><td>按上面第 2 节标一次，以后不再弹</td></tr>
+    <tr><td>分辨率不符 / 属于另一台相机</td><td>旧标定对不上当前这台相机（换了相机或改了分辨率）</td><td>程序已自动停用这份内参（测距显示"不可测"），重新标定即可</td></tr>
+  </table>
+  <span style="opacity:.8">另外：笔记本 + USB 外接同时存在（多台摄像头）时，程序分不清正在用哪一台 ——
+  在下拉框里<strong>指认一下</strong>程序用的是哪台（是"确认身份"，不是"切换相机"），之后会记住。
+  标定成功后弹窗里那句「已按设备记住」出现，就说明记住了。</span>
+</div>
+
 <h2>3 · 卷尺三点测距（核心验收，约 15 分钟）</h2>
 <p>这一步就是 CHARTER 写死的验收标准，做的时候不用紧张，按下面来就行：</p>
+
+<div class="box warn-box">
+  <strong>先知道一件事：这套测距有「最近可测距离」，比它更近就是测不了 —— 这是几何决定的，不是模型问题。</strong><br>
+  主用的<strong>地面接触点法</strong>只有一条假设：<em>检测框底边踩在地面上</em>。所以相机必须看得见人的<strong>脚</strong>。
+  脚一旦掉到画面下边界之外，这个方法就无解，程序会<strong>拒绝给数字</strong>（显示「不可测」），
+  而不是拿别的数糊弄你。<br><br>
+  <strong>最近可测距离 = 相机安装高度 ÷ tan(俯仰角 + 画面下半视场角)</strong>。
+  其中「画面下半视场角」是这台相机的固定值 = <code>atan((480 − cy) / fy)</code>，
+  按当前标定算是 <strong>14.0°</strong>。<br><br>
+  代入<strong>本机当前</strong>的配置（2026-09-25 自标定结果：<strong>H = 0.65 m、俯仰角 5.0°</strong>）：
+  <strong>最近可测 ≈ 1.9 m</strong>；2 m 处脚点离画面下边界只剩 <strong>约 15 px</strong> ——
+  所以人<strong>稍微往前一点就掉出画面、变「不可测」</strong>，这是预期行为。<br><br>
+  <strong>卡住时先看原因</strong>：「目标距离」<strong>下面那行小字直接写着为什么</strong>
+  （不用再去悬停了，悬停里是同一句话）。写着 <span class="kbd">脚被画面下边界裁掉（目标太近）</span>
+  就是这个情况。<br><br>
+  <strong>想让人走近一点也能测，就压低镜头（增大俯仰角）</strong> —— 按推荐公式，
+  你的高度（0.65 m）本应配 <strong>7.5°</strong>（`俯仰角 ≈ atan(H/2) − 10.5°`，H ≤ 0.9 m 时适用），
+  现在装的是 5.0°，差了 2.5°。改完的差别：
+  <table>
+    <tr><th>俯仰角</th><th>最近可测</th><th>2 m 处脚点余量</th><th>5 m 头顶</th><th>10 m 头顶</th></tr>
+    <tr><td>5.0°（现在）</td><td>1.88 m</td><td>15 px（很险）</td><td>入画</td><td>入画</td></tr>
+    <tr><td><strong>7.5°（推荐）</strong></td><td><strong>1.65 m</strong></td><td><strong>51 px</strong></td><td>入画（剩 9 px）</td><td>入画</td></tr>
+    <tr><td>10.0°</td><td>1.46 m</td><td>86 px</td><td>出画</td><td>入画</td></tr>
+    <tr><td>15.0°</td><td>1.17 m</td><td>155 px</td><td>出画</td><td>出画</td></tr>
+  </table>
+  <span style="opacity:.8">「头顶出画」只影响高度法与两法互检（近处的人只看得见身子），<strong>接触点法照样能测</strong>。
+  改完镜头角度后重做一次下面的第 2 步（<span class="kbd">求解安装参数</span> 会把新角度自己解出来），
+  也可以在设置页直接填俯仰角（会落盘）。重算这张表：
+  <span class="file">E:\WorkBuddy-Work\scripts\plan_near_field.py</span>（读 calib.json + mount.json 自动算）。</span><br><br>
+  <span style="opacity:.8">另：<strong>想让深度模型来救近场是行不通的</strong> —— 我们实测的那版米制深度模型
+  （Depth-Anything-V2 米制 · VKITTI 版）训练数据里几乎没有 2 m 以内的样本，
+  把贴着镜头（&lt;0.5 m）的人报成 3.59 m，近场正是它最不可信的区间。</span>
+</div>
+
 <div class="box">
   <strong>相机装多高、朝下多少度？</strong><br>
   <strong>情况 A：高度你能自己选</strong>（三脚架 / 车顶支架可调）—— 在
@@ -175,8 +253,9 @@
   </li>
   <li>然后才是正式测距：让那个人站在 <strong>2 米</strong> 标记处，面向摄像头<strong>站直</strong>。</li>
   <li>回到「监视」页。目标被框住后，旁边会显示类似 <span class="kbd">person 0.85 1.98m</span>；「目标位置」分组里的<strong>「目标距离」</strong>也会显示同一个数。
-    读数后面会标出用了哪种方法（<strong>接触点法 / 高度法 / 两法一致</strong>）——
-    显示「不可测」= 这帧不算，别硬记；<strong>把鼠标停在读数上</strong>会告诉你为什么不可测。</li>
+    读数<strong>下面那行小字</strong>会说明这个数是怎么来的（<strong>接触点法 / 高度法 / 两法一致</strong>）；
+    显示「不可测」时，那行小字<strong>就是原因</strong>（例如「脚被画面下边界裁掉（目标太近）」），
+    <strong>不用再去悬停</strong>。这帧不算，别硬记。</li>
   <li>等数字<strong>稳定不闪了</strong>，记下来。然后在 5 米、10 米重复。</li>
 </ol>
 <table>
@@ -196,8 +275,10 @@
 <ol>
   <li>切到 <strong>「录制回放」页</strong>，点 <span class="kbd">开始录制</span>。</li>
   <li>让那个人<strong>从 3 米处走到 10 米处，再走回来</strong>（录 30~60 秒）。中途可以在 5 米附近停一停。</li>
-  <li>点 <span class="kbd">停止录制</span>，弹窗里显示<strong>时长、视频帧数、数据轨条数、丢帧数</strong> —— 记下来（丢帧应该是 0，不是 0 也告诉我）。</li>
-  <li>点 <span class="kbd">选择录制</span> → 选中刚生成的会话 → 点 <span class="kbd">播放</span>：
+  <li>点 <span class="kbd">停止录制</span>，弹窗里显示<strong>时长、视频帧数、数据轨条数、丢帧数</strong> —— 记下来（丢帧应该是 0，不是 0 也告诉我）。
+    录完会<strong>自动加载</strong>到回放页（信息行显示「已加载：session-…」），不用再手动选。</li>
+  <li>直接点 <span class="kbd">播放</span>（回放页已自动加载刚录的这段；要看以前的录像，点
+    <span class="kbd">选择录制</span>，会列出所有录像供挑选）。
     <ul>
       <li>视频能正常播？</li>
       <li>下面的<strong>测距曲线</strong>有没有跟着人的走远/走近起伏？（走近距离变小、走远变大）</li>
@@ -216,6 +297,8 @@
   <li>录制弹窗：时长 ______ s　视频 ______ 帧　数据轨 ______ 条　丢帧 ______</li>
   <li>回放正常吗：视频 □能 □不能　测距曲线 □有起伏 □平的 □没有曲线</li>
   <li>中间弹过任何报错吗：□没有 □有（把文字抄给我或截图）</li>
+  <li>设置页「本机摄像头」那栏最后显示的状态：__________（最好是「已标定（本设备）」）</li>
+  <li>实测最近能测到多近：约 ______ m（人再往前走就变「不可测」的那个距离）</li>
 </ol>
 </div>
 
@@ -223,14 +306,18 @@
 <table>
   <tr><th>现象</th><th>多半是</th><th>怎么办</th></tr>
   <tr><td>一直显示"未检测到棋盘格"</td><td>棋盘没完整入画 / 太斜 / 光线太暗 / 纸反光</td><td>挪远一点让棋盘全部入画，倾斜别超过 45°，别让灯直射纸面</td></tr>
-  <tr><td>目标框都没有</td><td>检测没跑起来或目标太小</td><td>确认「监视」页有画面、类别选了 person；人远时 detection_height 会小于最小像素限制，属正常，走近些</td></tr>
+  <tr><td>目标框都没有</td><td>模型没加载成功；也可能是检测没跑起来、目标太小</td><td>先看状态栏有没有「AI模型加载并初始化成功」：没有就检查「模型文件」「标签文件」两个框里的路径还在不在、点一次 <span class="kbd">应用参数</span>；再确认「监视」页有画面、类别选了 person；人很远时框会小于最小像素限制，走近些</td></tr>
   <tr><td>有框但没距离数字</td><td>没标定成功</td><td>看设置页标定状态是不是"已标定"；不是就回到第二步重做（「目标距离」会显示"不可测"）</td></tr>
+  <tr><td>有框，但人一走近就显示「不可测」</td><td>脚掉出了画面下边界 —— 太近了。这是地面接触点法的几何限制，<strong>不是模型问题</strong></td><td>「目标距离」<strong>下面那行小字就是原因</strong>，写着「脚被画面下边界裁掉（目标太近…）」就是它；让人退到约 1.9 m 以外即可。想测更近就压低镜头 —— 见第 3 节的俯仰角对照表</td></tr>
   <tr><td>距离明显不对（差好几倍）</td><td>方格边长和实际打印不符（默认 17.1mm 是本机打印机的实测值；换打印机、换纸型，或打印被缩放就不符）</td><td>读数和真实值差距是固定比例的话，改对「方格边长」就能修好，不用重标</td></tr>
   <tr><td>求解时弹"标定失败"</td><td>有效帧太少或姿态太单一</td><td>重新采集，多换几个位置和角度</td></tr>
+  <tr><td>启动时弹「需要标定相机」</td><td>这台相机第一次用，或换了新相机</td><td>正常提醒，按第 2 节标一次即可；标定会按设备记住，同一台相机以后不再弹</td></tr>
+  <tr><td>设置页相机状态写着「未绑定设备」</td><td>标定文件是老版程序存的，没记"属于哪台相机"</td><td>确定就是这台相机就点「绑定到本设备」；不确定就重标一次（几分钟的事，比绑错强）</td></tr>
+  <tr><td>相机状态写着「分辨率不符」或「属于另一台相机」</td><td>换了相机或改了分辨率，旧内参不能再用</td><td>程序已自动停用它（不会拿错误内参硬算）；重新标定一次就恢复</td></tr>
 </table>
 
 <h2>7 · 做完以后</h2>
-<p>把第 5 节那 7 条信息发我。我来判断：标定质量够不够、三点测距过没过 CHARTER 门槛、录制回放有没有问题。都过了，这一期的实地验收就闭环了，剩下的就是把代码合回主线的事。</p>
+<p>把第 5 节那 10 条信息发我。我来判断：标定质量够不够、三点测距过没过 CHARTER 门槛、录制回放有没有问题。都过了，这一期的实地验收就闭环了，剩下的就是把代码合回主线的事。</p>
 
 </body>
 </html>

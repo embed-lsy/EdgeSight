@@ -363,6 +363,19 @@ QLineEdit, QTextEdit {
                    </layout>
                   </item>
                   <item>
+                   <widget class="QLabel" name="label_distance_reason">
+                    <property name="text">
+                     <string/>
+                    </property>
+                    <property name="wordWrap">
+                     <bool>true</bool>
+                    </property>
+                    <property name="styleSheet">
+                     <string notr="true">font-size: 9pt;</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
                    <layout class="QHBoxLayout" name="horizontalLayout_mount">
                     <item>
                      <widget class="QLabel" name="label_known_dist">
@@ -841,7 +854,7 @@ QLineEdit, QTextEdit {
                    </size>
                   </property>
                   <property name="text">
-                   <string>标签文件文件：</string>
+                   <string>标签文件：</string>
                   </property>
                  </widget>
                 </item>
@@ -862,7 +875,7 @@ QLineEdit, QTextEdit {
                 <item>
                  <widget class="QLabel" name="label_label_path">
                   <property name="text">
-                   <string>当前模型</string>
+                   <string>当前标签</string>
                   </property>
                   <property name="alignment">
                    <set>Qt::AlignmentFlag::AlignCenter</set>
@@ -1135,6 +1148,76 @@ QLineEdit, QTextEdit {
               <string>相机标定</string>
              </property>
              <layout class="QVBoxLayout" name="verticalLayout_calib">
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_camdev">
+                <item>
+                 <widget class="QLabel" name="label_camera_device">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>40</height>
+                   </size>
+                  </property>
+                  <property name="text">
+                   <string>本机摄像头：</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QComboBox" name="combo_camera_device">
+                  <property name="toolTip">
+                   <string>程序固定打开索引 0 的摄像头。本机只有一台时会自动确认；有多台时请在这里指明程序正在用的是哪一台——标定结果按设备分别保存，换相机不会混用别人的内参。</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_camera_status">
+                <property name="text">
+                 <string>正在识别摄像头……</string>
+                </property>
+                <property name="wordWrap">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_cambind">
+                <item>
+                 <widget class="QPushButton" name="btn_camera_bind">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>40</height>
+                   </size>
+                  </property>
+                  <property name="toolTip">
+                   <string>把当前已经加载的标定认到这台设备名下。适用于「升级后沿用着旧标定文件、且确定就是这台相机拍的」——不想再标一次就点它。</string>
+                  </property>
+                  <property name="text">
+                   <string>把当前标定绑定到本设备</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btn_camera_scan">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>40</height>
+                   </size>
+                  </property>
+                  <property name="toolTip">
+                   <string>重新枚举一次本机摄像头（插拔设备后用）。正常识别是毫秒级的，点它不会有明显等待。</string>
+                  </property>
+                  <property name="text">
+                   <string>重新检测设备</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
               <item>
                <layout class="QHBoxLayout" name="horizontalLayout_31">
                 <item>
