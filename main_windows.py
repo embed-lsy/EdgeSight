@@ -6,9 +6,11 @@ from core.config.windows_global_params import GlobalParams
 from core.camera.opencv_camera import CameraInitThread
 from core.detector import ModelInitThread, YOLODetector
 from core.calibration import (CameraCalibrator, CameraIntrinsics,
-                              GeometricRanger, RangingConfig, solve_intrinsics,
+                              GeometricRanger, RangingConfig, RangingResult,
+                              compute_box_visibility, solve_intrinsics,
                               solve_mount_params, save_mount_params,
                               load_mount_params)
+from core.person_model import PersonFeatureTracker, SpeedGate
 from core.recorder import Recorder, Replayer, FrameRecord
 # 摄像头设备识别（CHARTER「范围内的」第 1 条：内参按设备记忆）
 from core.camera.device_identity import (IdentityReport, enumerate_cameras,
@@ -116,6 +118,22 @@ class MainWindow(QWidget, Ui_Form):
         # 几何测距器。先无内参构造，load_calibration() 后注入
         self.ranger = GeometricRanger(CameraIntrinsics(),
                                       RangingConfig.from_params(self.global_params))
+        # ------------------------------------------------------------------
+        # 人特征档案 + 速度门控（2026-09-25 P1+：近场宽度法的两大支柱）
+        # ------------------------------------------------------------------
+        # 档案：目标完整可见、接触点法出数的帧里顺手量这个人的身高/肩宽，
+        # 稳定窗口提交后宽度法用的就是「这个人自己的肩宽」（而非默认 0.46 m），
+        # 多人靠躯干外观直方图区分。门控：人不可能瞬移，相邻读数隐含速度
+        # 超过人体极限（8 m/s）的一律拦下 —— 拦的是检测跳变错值。
+        self._person_tracker = PersonFeatureTracker(
+            self.global_params.person_profile_path)
+        self._speed_gate = SpeedGate()
+        self._last_profile_key = ''     # 防止建档提示刷屏
+        # 最后一帧的测距结果：标定判定被**异步复核**（相机打开完成）时要用它把
+        # 原因行/悬停**原样重画**，不能拿 None 去刷 —— 否则读数文字留着上一帧的
+        # 值、原因行却被擦空，界面变成「不可测」+ 没有原因（实测偶发踩到）
+        self._last_ranging = None
+        # 启动时若档案里已有匹配不上的旧人，肩宽保持默认值，等见到人再自动匹配
         # 录制回放（CHARTER 第 6 条）
         self.recorder = None          # 非录制时为 None，避免误调
         self.replayer = None          # 回放器
@@ -554,7 +572,15 @@ class MainWindow(QWidget, Ui_Form):
         # None / 明确原因，而不是崩在 None.is_valid() 上。
         self.ranger.update_intrinsics(d.intrinsics if d.usable
                                       else CameraIntrinsics())
-        self.refresh_distance_widgets()
+        # ⚠️ 刷新测距控件时**必须带上最后一帧的结果**（不能留默认的 None）：
+        # 不带会把原因行与悬停擦空，而读数文字仍留着上一帧的值 —— 界面于是
+        # 变成「不可测」+ 一句原因都没有，正是「只看到不可测、不知为什么」那个
+        # 老问题，且只在这个异步复核恰好插在两次检测之间时出现（偶发，实测踩到）。
+        if not d.usable:
+            # 内参不可用时读数必须与原因行同源：一起变成「不可测」，
+            # 而不是把上一帧的旧数字留在界面上（显示与判定必须同源）
+            self.label_distance_value.setText('不可测')
+        self.refresh_distance_widgets(self._last_ranging)
         self.refresh_calib_widgets()
         # ⚠️ 必须连设备状态标签一起刷：判定可能在「相机打开后复核」时被改写
         # （例如分辨率此时才发现不符）。少了这一步，界面会停留在上一轮的文案上
@@ -815,7 +841,7 @@ class MainWindow(QWidget, Ui_Form):
         self.global_params.camera_height = h
         self.global_params.pitch_deg = p
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
-        self.refresh_distance_widgets()
+        self.refresh_distance_widgets(self._last_ranging)
 
         src = data.get('source') or '已保存'
         when = data.get('saved_at') or '—'
@@ -1065,7 +1091,7 @@ class MainWindow(QWidget, Ui_Form):
         """
         self.global_params.camera_height = float(value)
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
-        self.refresh_distance_widgets()
+        self.refresh_distance_widgets(self._last_ranging)
         self._persist_mount_params('手工填写')
 
     def _ranging_tooltip(self, res=None):
@@ -1247,7 +1273,7 @@ class MainWindow(QWidget, Ui_Form):
         self.global_params.camera_height = h_applied
         self.global_params.pitch_deg = pitch_applied
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
-        self.refresh_distance_widgets()
+        self.refresh_distance_widgets(self._last_ranging)
         # 落盘。上面两个 setValue 已经各自触发过一次落盘（来源会被记成「手工填写」），
         # 这里再用正确来源覆盖写一次 —— 文件很小，一次多余写入换来源标注准确，划算。
         self._persist_mount_params('自标定')
@@ -1835,12 +1861,66 @@ class MainWindow(QWidget, Ui_Form):
                 self.global_params.target_category,
             )
         dist = res.distance if res is not None else None
+
+        # ---- 速度门控 + 人特征档案（2026-09-25 P1+）------------------------
+        # 门控在人身上：人不可能瞬移，1.5→10 m 的跳变只可能是检测跳变/抓错框，
+        # 拦下并给出原因（拦的是错值，不是拦人）。非 person 目标（车等）相对
+        # 速度可以更高，不套人的极限。
+        now_mono = time.monotonic()
+        is_person = self.global_params.target_category == 'person'
+        if dist is not None and is_person:
+            verdict = self._speed_gate.check(dist, now_mono)
+            if not verdict.ok:
+                res = RangingResult(reason=verdict.reason)
+                dist = None
+            elif verdict.reason:
+                # 重新锚定（丢失超时 / 连续一致的新轨迹）：读数保留，说明进状态栏
+                self.status_bar.showMessage(verdict.reason, 4000)
+        else:
+            self._speed_gate.miss(now_mono)
+
+        # 人特征档案：完整可见 + 测距可信的帧顺手量身高/肩宽（一次直方图 <1 ms）。
+        # 采到的稳定窗口会提交进 models/person_profile.json，并把**这个人自己的
+        # 肩宽**灌进宽度法 —— 近场参考值的精度从「猜 0.46」升级成「量过的人」。
+        if is_person and isinstance(target, dict) \
+                and self.global_params.detection_height > 0 \
+                and self.ranger.intrinsics.is_valid():
+            vis = compute_box_visibility(
+                target, self.ranger.intrinsics.image_size)
+            capture_ok = bool(
+                dist is not None and res is not None and res.trusted
+                and res.method in ('接触点法', '两法一致')
+                and vis.checked
+                and not (vis.touches_top or vis.touches_bottom
+                         or vis.touches_left or vis.touches_right))
+            prev_width = self._person_tracker.current_width_m(
+                self.global_params.person_width_m)
+            self._person_tracker.observe(
+                target, getattr(self, 'current_frame', None), now_mono,
+                capture_ok=capture_ok, distance_m=dist,
+                fx=self.ranger.intrinsics.fx, fy=self.ranger.intrinsics.fy)
+            # 档案匹配/更新后，宽度法换用当前目标的肩宽（变了才动，避免抖动）
+            new_width = self._person_tracker.current_width_m(
+                self.global_params.person_width_m)
+            if abs(new_width - prev_width) > 1e-6:
+                self.global_params.person_width_m = new_width
+                self.ranger.config.person_width_m = new_width
+            # 建档/换人提示（只在新档案出现时说一次，不刷屏）
+            p = self._person_tracker.active
+            key = p.profile_id if p is not None else ''
+            if key and key != self._last_profile_key:
+                self._last_profile_key = key
+                self.status_bar.showMessage(
+                    f'人员特征已建档：身高 {p.height_m:.2f} m、肩宽 '
+                    f'{p.width_m:.2f} m —— 近场宽度法改用该肩宽', 6000)
         self.global_params.distance = dist
 
         # 实时距离读数（监视页「目标位置」分组，CHARTER 门槛判据）
         # display() 在存疑时给 "5.00 m？"、不可测时给 "不可测"，都不隐藏数据
         self.label_distance_value.setText(res.display() if res is not None else '不可测')
         # 悬停说明 + 界面上那行「为什么」一起刷（同源，见 refresh_distance_widgets）
+        # 同时记下这一帧的结果：标定判定异步复核时要用它原样重画，别把原因擦掉
+        self._last_ranging = res
         self.refresh_distance_widgets(res)
 
         # 安装参数自标定：采样窗口内收集「框底边像素」（只收真的检测到目标的帧）。

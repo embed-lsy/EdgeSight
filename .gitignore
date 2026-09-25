@@ -35,3 +35,5 @@ models/cameras.json
 models/mount.json
 # 模型选择记忆（机器路径相关，不入库）
 models/settings.json
+# 人特征档案（身高/肩宽/外观，跟具体的人和场景相关，不入库）
+models/person_profile.json

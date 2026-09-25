@@ -57,4 +57,9 @@ class GlobalParams:
         self.object_heights=dict(_OBJECT_HEIGHTS_DEFAULT)
         self.default_object_height=1.50
         self.min_pixel_height=8              # 像素高度下限，低于此值不测距
+        # 宽度法（近场参考值，2026-09-25 P1+）：脚出画、左右未裁时的兜底测法
+        # Z = fx * 肩宽 / 框宽。肩宽优先取人特征档案（person_profile.json）
+        # 里给当前目标量出的值；没有档案时用这个默认值。
+        self.person_width_m=0.46
+        self.person_profile_path='models/person_profile.json'
         self.distance=0.0                    # 当前目标解算距离（米），None 表示不可解算

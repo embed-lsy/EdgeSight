@@ -107,6 +107,17 @@ class RangingConfig:
     # 既能容纳 1.4 m 的矮个子与 2.0 m 的高个子，又能拦住实测中
     # 「被挡到腰 3.88 m」「只有下巴 3.58 m」这类不完整框。
     height_tolerance: float = 0.35
+    # 宽度法（近场参考值，2026-09-25 P1+）：**已填安装高度**、脚出画（框底边被
+    # 下沿裁掉）、左右未裁、且**框顶边在相机水平线以上**（`top_may_be_head`）
+    # 时的兜底测法 Z = fx * W_真实 / 框宽。
+    # 「顶边在水平线以上」是硬前提：相机只 0.64~1.2 m 高而人头在 1.4~2.0 m，
+    # 头顶必定高于相机；只贴着下沿、顶边却掉到水平线以下的框是「不完整的
+    # 目标」（上半身/一张脸），框宽不是肩宽，用它算会给出危险的错值
+    # （实测 2 m 的目标被算成 4.54 m）。
+    # W_真实 优先用 PersonFeatureTracker 量出的当前目标肩宽
+    # （models/person_profile.json），没档案时用这里的默认值。
+    person_width_m: float = 0.46   # 成年人肩宽默认值（米），参考级精度
+    min_pixel_width: int = 40      # 框宽低于此值不启用宽度法（噪声不可信）
 
     def height_for(self, class_name: str) -> float:
         return self.object_heights.get(class_name, self.default_height)
@@ -125,6 +136,8 @@ class RangingConfig:
             camera_height=float(getattr(params, 'camera_height', 0.0)),
             height_tolerance=float(getattr(params, 'height_tolerance', 0.35)),
             min_pixel_height=int(getattr(params, 'min_pixel_height', 8)),
+            person_width_m=float(getattr(params, 'person_width_m', 0.46)),
+            min_pixel_width=int(getattr(params, 'min_pixel_width', 40)),
         )
 
 
@@ -624,6 +637,16 @@ def load_mount_params(path: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 EDGE_TOL_PX = 2.0             # 框边距画面边界多少像素内算「贴边」
+# ⚠️ 底边单独用更大的容差（2026-09-25 19:45 录制实证）：
+# 「被画面裁掉的目标，其框边必然贴在画面边界上」这个假设**对底边不成立**——
+# YOLO 在画面底缘有系统性欠检。用真实走近录像（session-20260925-194532，
+# 人从 2 m 走到贴脸）逐帧核对：脚早已出画的帧，检测框底边实测落在
+# 464~475 px（画面高 480），欠检幅度 5~16 px，**永远够不到 2 px 容差线**。
+# 后果是接触点法把这些「假底边」当真脚读，任何 <1.9 m 的距离都被算成
+# 几何下限 ~1.9 m —— 用户走回镜头的整段读数冻结在 1.8/1.9。
+# 12 px 的依据：覆盖实测欠检的主区间（5~12 px），同时小于 2 m 处真脚点的
+# 安全余量（2 m 时真底边 ≈461 px、距底缘 19 px），不误伤已验收的 2 m 测量。
+FOOT_CLIP_TOL_PX = 12.0       # 框底边距画面底边多少像素内视为「脚可能被裁」
 MIN_CONTACT_ANGLE_DEG = 1.0   # 接触点法的最小俯角：低于此值地面交点趋近无穷远
 MUTUAL_CHECK_RATIO = 0.30     # 双源互检：两法差异超过此比例即标「存疑」
 
@@ -636,7 +659,10 @@ class VisibilityReport:
     ------------------
     检测框是**可见部分的最小包围盒**，不是物体的完整轮廓 —— 目标只要露出一
     部分就会被框出来。``core/detector/postprocess.py`` 用 ``np.clip`` / ``min``
-    把框压在画面内，所以**被画面裁掉的目标，其框边必然贴在画面边界上**。
+    把框压在画面内，所以**被画面裁掉的目标，其框边通常停在画面边界附近**。
+    ⚠️ 但「必然贴在边界上」是理想化假设：YOLO 在画面底缘有 5~16 px 的
+    系统性欠检（2026-09-25 录制实证），所以底边判定用专用容差
+    ``FOOT_CLIP_TOL_PX``，见常量注释。
 
     而两条测距法都隐含「框是完整的」这个前提：
 
@@ -649,7 +675,8 @@ class VisibilityReport:
     """
 
     touches_top: bool = False      # 框上边贴画面顶边 -> 头顶被裁
-    touches_bottom: bool = False   # 框下边贴画面底边 -> 脚/底部被裁
+    touches_bottom: bool = False  # 框下边贴/接近画面底边 -> 脚可能被裁（含
+                                   # 检测器底缘欠检带，见 FOOT_CLIP_TOL_PX）
     touches_left: bool = False
     touches_right: bool = False
     aspect: float = 0.0            # 框宽 / 框高
@@ -688,6 +715,10 @@ def compute_box_visibility(box: dict, image_size,
 
     ``box`` 用 ``YOLODetector`` 的字段（``x``/``y`` 是中心，``width``/``height``
     是尺寸），与 ``distance_from_box`` 保持一致。
+
+    ⚠️ 底边用专用容差 ``FOOT_CLIP_TOL_PX``（12 px），不是其它边的 2 px ——
+    YOLO 在画面底缘欠检 5~16 px（见该常量的注释），2 px 会把「脚已被裁」
+    的框放过，让接触点法读假底边（实测整段走近过程读数冻结在 1.9 m）。
     """
     if not image_size or len(image_size) < 2:
         return VisibilityReport()
@@ -705,7 +736,7 @@ def compute_box_visibility(box: dict, image_size,
 
     return VisibilityReport(
         touches_top=y1 <= tol,
-        touches_bottom=y2 >= img_h - tol,
+        touches_bottom=y2 >= img_h - max(tol, FOOT_CLIP_TOL_PX),
         touches_left=x1 <= tol,
         touches_right=x2 >= img_w - tol,
         aspect=(w / h) if h > 0 else 0.0,
@@ -759,6 +790,26 @@ def bottom_may_touch_ground(v_bottom: float, cy: float, fy: float,
     angle = np.deg2rad(float(pitch_deg)) + np.arctan2(
         float(v_bottom) - float(cy), float(fy))
     return bool(angle > np.deg2rad(MIN_CONTACT_ANGLE_DEG))
+
+
+def top_may_be_head(v_top: float, cy: float, fy: float,
+                    pitch_deg: float = 0.0) -> bool:
+    """框顶边是否落在相机水平线**以上**（即这一点可能比相机高）。**纯函数**。
+
+    ``bottom_may_touch_ground`` 的镜像判据，用于**近场宽度法**的前提检查。
+
+    物理依据：本项目机位下相机只有 0.64~1.2 m 高，而成年人的头顶在
+    1.4~2.0 m —— **头顶必定高于相机**，所以「框顶边」这条视线必须朝上
+    （俯仰角 + 像素偏移的合成角 < 0）。顶边若落在水平线以下，说明框的顶
+    根本不是头顶（多半只框到上半身/一张脸），它的**框宽也就不是肩宽**。
+
+    实测踩过：笔记本机位（H=0.70 m、俯仰 0°）下喂一个「顶边在 v=468、
+    底边被画面下沿裁掉」的框，旧实现按框宽算出 **4.54 m**（目标实际只有
+    2 m 远）——方向危险的错值。加上本判据后该框被拒（顶边在水平线以下）。
+    """
+    angle = np.deg2rad(float(pitch_deg)) + np.arctan2(
+        float(v_top) - float(cy), float(fy))
+    return bool(angle < 0.0)
 
 
 def estimate_target_height(v_bottom: float, pixel_height: float,
@@ -879,6 +930,33 @@ class GeometricRanger:
             class_name=class_name,
         )
 
+    def _distance_from_width(self, pixel_width: float) -> Optional[float]:
+        """宽度法（近场参考值）：``Z = fx * 肩宽 / 框宽``。
+
+        与高度法完全对称的投影修正（光轴深度 -> 地面距离），只是把
+        「目标真实高度」换成「目标真实宽度」、框高换成框宽。
+
+        为什么敢在脚出画时用它：框是**可见部分**的包围盒，脚出画只说明
+        下边被裁；左右未裁时框宽仍等于这个人的真实可见宽度 —— 这个量
+        没有被「太近」破坏。高度法/接触点法用的量（框高/框底边）才是
+        被破坏的。
+
+        精度天花板（写死成参考级的理由）：
+        · 肩宽来自档案或默认 0.46 m，本身就是估计值；
+        · 人一转身，「可见宽度」从肩宽变成肩深（~0.25 m），差近一倍；
+        · 抬臂/拎物让框宽虚大。所以调用方必须标 ``trusted=False``。
+
+        ⚠️ 不做俯仰修正（与高度法不同）：修正项需要 ``bottom_v`` 对应
+        目标真实落点，而宽度法只在**脚出画**时启用 —— 那时 bottom_v 是
+        被画面裁出来的假边，拿它修正等于用一个已知错误的量加戏。
+        """
+        if not self.intrinsics.is_valid():
+            return None
+        fx = float(self.intrinsics.fx)
+        if fx <= 0 or pixel_width is None or pixel_width <= 0:
+            return None
+        return float(fx * self.config.person_width_m / pixel_width)
+
     def measure_from_box(self, box: dict, class_name: str = '',
                          image_size=None) -> RangingResult:
         """综合入口：先体检可见性，再选方法出数，最后两法互检。
@@ -887,6 +965,9 @@ class GeometricRanger:
 
             脚可见且已量相机高度 -> 接触点法
             脚不可见但框完整     -> 高度法（仅限已登记真实高度的类别）
+            框底边进底缘带（脚贴近画面底缘或已出画）、左右未裁、
+                 顶边在相机水平线以上 -> 宽度法（仅限 person，**参考级**：
+                 肩宽可能是估计值、侧身会高估，恒标 trusted=False）
             两法都算得出         -> 互检，差异超阈值标「存疑」
             都不行               -> 不可测，并把原因说到点子上
 
@@ -896,6 +977,7 @@ class GeometricRanger:
             return RangingResult(reason='相机未标定')
 
         h_px = float(box.get('height', 0.0))
+        w_px = float(box.get('width', 0.0))
         if h_px < self.config.min_pixel_height:
             return RangingResult(reason=f'目标太小（框高 {h_px:.0f} px）')
 
@@ -936,6 +1018,106 @@ class GeometricRanger:
                                 f'超出「{class_name}」的合理范围 '
                                 f'{lo_h:.2f}~{hi_h:.2f} m：目标可能不完整'))
 
+        # ---- 框底边进底缘带（脚可能被裁，2026-09-25 实证冻结读数后收紧）----
+        # 这一段必须排在宽高比体检**之前**：近场的人框天然不满足
+        # 「站立的人 0.15~0.75」的宽高比先验（贴脸时框占满画面、宽高比 >1），
+        # 若先过体检会把宽度法唯一能出数的路径整个拦掉。
+        #
+        # 触发条件是 ``vis.touches_bottom``：底边距画面底边 ≤ FOOT_CLIP_TOL_PX
+        # （12 px）。为什么不能像以前那样只认「底边真的贴到 480」—— YOLO 在
+        # 画面底缘欠检 5~16 px，被裁的脚给出的假底边落在 464~475，2 px 容差
+        # 永远拦不住；接触点法读到假底边就会把任何 <1.9 m 的距离算成几何下限
+        # ~1.9 m（19:45 录制：用户从 2 m 走回贴脸，整段读数冻结在 1.9 附近）。
+        # 宁可把「脚可能还在画面里」的帧也降级成参考/警报，也不给冻结的错值。
+        #
+        # 宽度法（近场参考值，2026-09-25 P1+）：只要左右没被裁，框宽就是
+        # 「这个人真实的可见宽度」—— 对正对/背对相机站立的人即肩宽（含臂）。
+        # 这是几何法对近场的**最后一条路**，天生参考级：
+        #   · 侧身时可见深度只有 ~0.25 m，会把距离**高估近一倍**
+        #     （方向危险：以为远、实际近），所以恒标 trusted=False；
+        #   · 抬臂/拎东西时框宽虚大 -> 距离偏近（方向安全）。
+        # 缓解：跟随场景几乎都是背后跟（肩面朝相机，宽度法最准姿态），
+        # 且肩宽优先用 PersonFeatureTracker 给这个人量出的档案值。
+        #
+        # ⚠️ 前提：① 已填相机安装高度 —— 理由见下；② 框的**顶边必须落在相机
+        # 水平线以上**（``top_may_be_head``）。依据是几何：本项目机位相机只有
+        # 0.64~1.2 m 高，人的头顶在 1.4~2.0 m，**头顶必定高于相机**，所以框
+        # 顶边的视线必须朝上。实测一个「顶边在画面内、底边被下沿裁掉」的不完整
+        # 框（只框到上半身）会被宽度法算成 4.54 m（目标实际 2 m）—— 方向危险的
+        # 错值；加上本判据即被拒。
+        # 本机位下真正的近场框（整个人撑满画面）必然满足：脚出画的临界
+        # 1.85 m 远小于头顶出画的临界 3.6 m，所以脚出画的人头也出画，
+        # 框顶边在画面顶边（远高于水平线）。
+        # ① 的理由：「脚是否出画」这件事本身要靠安装参数才判得准（见 1.85 m 那个
+        # 临界）；安装参数没填时，全链路本来就给不出任何距离，这时最有用的一句话
+        # 是「去填/去自标定安装参数」，而不是先给一个来路不明的参考值。
+        if vis.touches_bottom:
+            if (class_name == 'person' and self.config.camera_height > 0
+                    and top_may_be_head(
+                        bottom_v - h_px, self.intrinsics.cy, self.intrinsics.fy,
+                        self.config.pitch_deg)
+                    and not vis.touches_left and not vis.touches_right
+                    and w_px >= self.config.min_pixel_width):
+                d_width = self._distance_from_width(w_px)
+                if d_width is not None:
+                    if d_width < 0.5:
+                        # 距离近到 <0.5 m 时宽度法的误差已盖过信号
+                        # （肩宽假设错 10% 就是 5 cm 以上），且这个量级
+                        # 对控制端只剩一个语义：立即减速。给定性警报，
+                        # 不给一个看起来精确的错值。
+                        return RangingResult(
+                            reason=('目标过近（宽度法估算 <0.5 m）：'
+                                    '进入减速/制动区，不建议再接近'))
+                    return RangingResult(
+                        distance=d_width, method='宽度法(参考)', trusted=False,
+                        reason=(f'参考值（宽度法）：脚贴近画面底缘或已出画，'
+                                f'几何法已不可信，改按肩宽 '
+                                f'{self.config.person_width_m:.2f} m 估算；'
+                                f'侧身时可能高估近一倍，仅供减速参考'))
+            # 宽度法也失效：框左右都贴边，或框宽已占满画面宽度的大头
+            # （目标近到只剩躯干撑满画面）—— 这时给定性警报比给一个不可信
+            # 的数更有用：刹车不需要精确值。
+            # 「占满画面宽度」不能只看 touches_left/right：YOLO 在画面右缘
+            # 也有欠检（实测贴脸帧右缘欠检可达 37 px），框宽占比是更稳的判据。
+            fills_width = (vis.checked and image_size is not None
+                          and w_px >= 0.85 * float(image_size[0]))
+            if (vis.touches_left and vis.touches_right) or fills_width:
+                return RangingResult(
+                    reason=('目标过近（检测框已占满画面，宽度法也失效）：'
+                            '进入减速/制动区'))
+            # ---- 到这里宽度法不可用，只剩「把原因说到点子上」 ----
+            # 判序（每条都对应实测出现过的一种画面）：
+            #   ① 左右被裁     -> 横移出画，框宽已不是肩宽
+            #   ② 未填安装高度 -> 接触点法无从下手（先说清缺什么）
+            #   ③ 上下都贴边   -> 目标太近、整个人撑满画面（**最有用的一句**）
+            #   ④ 顶边在水平线以下 -> 框的顶不是头顶，框不完整（别谎称「脚被裁」）
+            #   ⑤ 其余只贴下沿 -> 底端无法确认，说明白而不是给数
+            # ③ 必须排在后面几条前面：H = 0.64 m、俯仰 5° 的机位下，人走到脚
+            # 出画（1.85 m）时头顶必然早已出画（头顶出画临界在 3.6 m），笼统的
+            # 「超出画面上下边界」会把真正有用的一句（脚被裁 = 太近）永远挡在
+            # 后面（实测踩过）。反过来 ④ 也不能省：顶边掉到水平线以下的框
+            # 不是「太近」，是「检测框不完整」，说成「太近」会把用户引向错误处置。
+            if vis.touches_left or vis.touches_right:
+                return RangingResult(
+                    reason='脚贴近画面底缘或已被裁，且检测框左/右被裁'
+                           '（目标贴近画面边缘），宽度法不可用')
+            if self.config.camera_height <= 0:
+                return RangingResult(reason='脚贴近画面底缘或已被裁，且未填相机安装高度')
+            if vis.touches_top:
+                return RangingResult(
+                    reason='脚贴近画面底缘或已被裁（目标太近，整个人撑满了画面）：'
+                           '两条几何法都以「框底边 = 脚」为前提，脚不在画面里就无解')
+            if not top_may_be_head(bottom_v - h_px, self.intrinsics.cy,
+                                   self.intrinsics.fy, self.config.pitch_deg):
+                return RangingResult(
+                    reason='检测框顶边落在相机水平线以下：目标框不完整'
+                           '（人的头顶必定高于相机，多半只框到上半身/头部），'
+                           '框宽不能当作肩宽，无法可靠测距')
+            return RangingResult(
+                reason='框底边贴近画面底缘，无法确认目标底端（脚）未被裁：'
+                       '目标可能较近，也可能恰好站在最近可测距离上；'
+                       '为保证不出错值，此帧不给数')
+
         # ---- 兜底体检：宽高比（判别力有限，不作主力） ----
         # 实测被挡到腰 0.56、只有下巴 0.60 都落在「站立的人」区间内，全部逃过；
         # 它只能拦 aspect > 0.9 的极端情形（横向的手、极端特写）。
@@ -975,22 +1157,6 @@ class GeometricRanger:
             return RangingResult(distance=d_height, method='高度法')
 
         # ---- 都不行：把原因说到点子上，绝不给兜底数字 ----
-        if vis.touches_bottom:
-            # 先判「脚被画面下边界裁掉」这一族，**原因始终指向脚**。
-            #
-            # 原来的顺序是「上下都贴边」优先、给一句「目标超出画面上下边界，无法测距」。
-            # 但本项目典型安装参数下（H = 0.65 m、俯仰角 5°），人走到脚出画的距离
-            # （约 1.9 m）时**头顶必然早已出画**（头顶出画的临界在 3 m 开外）——
-            # 于是那句笼统的话会把真正有用的一句（脚被裁）**永远挡在后面**。
-            # 实测在真实走近场景里就是这样：用户只看到「目标超出画面上下边界」，
-            # 既不知道是"太近"、更不知道该怎么办。
-            if self.config.camera_height <= 0:
-                return RangingResult(reason='脚被画面下边界裁掉，且未填相机安装高度')
-            if vis.touches_top:
-                return RangingResult(
-                    reason='脚被画面下边界裁掉（目标太近，整个人撑满了画面）：'
-                           '两条几何法都以「框底边 = 脚」为前提，脚不在画面里就无解')
-            return RangingResult(reason='脚被画面下边界裁掉（目标太近）')
         if class_name not in self.config.object_heights:
             if self.config.camera_height <= 0:
                 return RangingResult(
