@@ -74,6 +74,42 @@ class CameraIntrinsics:
         )
 
 
+# ---------------------------------------------------------------------------
+# 类别名归一化（2026-09-25 22:14 录制实证：标签文件是用户可选的）
+# ---------------------------------------------------------------------------
+#
+# 教训（session-20260925-221445/221525，人 0→2m→0 全程）：标签文件从英文
+# ``coco_labels.txt`` 换成中文 ``coco_labels_cn.txt`` 后，检测回调给的类别名
+# 变成「人」，而本模块所有 person 专属逻辑（宽度法近场兜底、反解身高判据、
+# 宽高比体检、高度法）都在匹配英文 'person' —— **全部静默失效**，整段走路
+# 过程 63%~68% 的帧判「不可测」（换标签前同类会话只有 15%~26%）。
+# 而这不是罕见配置：models/labels/ 下两种标签文件并存，UI 上随手一切就中招。
+#
+# 修法：所有「按类别名查表/比较」的入口统一先过 ``canonical_class_name``。
+# 只登记 object_heights / aspect_limits 里实际用到的类别（其余类别查表
+# 本来就走默认兜底，归不归一无差别）。TTC 走 class_id（整数），天然免疫。
+CLASS_NAME_ALIASES = {
+    # 中文 COCO 标签（coco_labels_cn.txt 实测用词） -> 规范英文名
+    '人': 'person',
+    '自行车': 'bicycle',
+    '汽车': 'car',
+    '摩托车': 'motorcycle',
+    '公交车': 'bus',
+    '卡车': 'truck',
+}
+
+
+def canonical_class_name(name) -> str:
+    """把标签文件给出的类别名归一化成模块内部用的规范英文名。**纯函数**。
+
+    未知名字原样返回（交给下游的默认兜底，不猜、不抛异常）——
+    标签文件是用户可换的，归一化层必须对没见过的名字保持惰性。
+    """
+    if not isinstance(name, str):
+        return ''
+    return CLASS_NAME_ALIASES.get(name.strip(), name.strip())
+
+
 @dataclass
 class RangingConfig:
     """几何测距所需的、代码里看不出来的约束。
@@ -120,7 +156,8 @@ class RangingConfig:
     min_pixel_width: int = 40      # 框宽低于此值不启用宽度法（噪声不可信）
 
     def height_for(self, class_name: str) -> float:
-        return self.object_heights.get(class_name, self.default_height)
+        return self.object_heights.get(
+            canonical_class_name(class_name), self.default_height)
 
     @classmethod
     def from_params(cls, params) -> 'RangingConfig':
@@ -130,7 +167,10 @@ class RangingConfig:
         避免两处各写一份默认值、日后改一处忘另一处。
         """
         return cls(
-            object_heights=dict(getattr(params, 'object_heights', {}) or {}),
+            object_heights={
+                canonical_class_name(k): v
+                for k, v in (getattr(params, 'object_heights', {}) or {}).items()
+            },
             default_height=float(getattr(params, 'default_object_height', 1.50)),
             pitch_deg=float(getattr(params, 'pitch_deg', 0.0)),
             camera_height=float(getattr(params, 'camera_height', 0.0)),
@@ -647,6 +687,18 @@ EDGE_TOL_PX = 2.0             # 框边距画面边界多少像素内算「贴边
 # 12 px 的依据：覆盖实测欠检的主区间（5~12 px），同时小于 2 m 处真脚点的
 # 安全余量（2 m 时真底边 ≈461 px、距底缘 19 px），不误伤已验收的 2 m 测量。
 FOOT_CLIP_TOL_PX = 12.0       # 框底边距画面底边多少像素内视为「脚可能被裁」
+# ⚠️ 滞回带宽（2026-09-26 用户授权治本，实录选参）：
+# 上面那个 12 px 是**无记忆的硬阈值**，而实测底边帧间抖动中位 2.5~4.0 px、
+# P90 11~17 px、最大 25~45 px（四个「走回镜头」会话），阈值线正好落在这片
+# 抖动里 → `touches_bottom` 逐帧翻转，四个会话分别翻转 26/28/34/20 次。
+# 它一侧是接触点法（脚出画时读假底边、读数冻结在几何下限 ~1.95 m），另一侧
+# 是宽度法（1.3~1.6 m）；每切一次就是一次读数跳变，相邻帧斜率可达 3.9 m/s，
+# 把 TTC / 趋势估计整体毒化。中值滤波只能压孤立尖刺，对这种「边界处来回切」
+# 无能为力 —— 治本靠滞回：进入用 468、退出用 468−本值，带内保持上一状态。
+# 12 px 的依据：覆盖实测抖动的 P90（11~17 px）主区间，把「真实过境」与
+# 「噪声抖动」分开。代价是退出略滞后（读数在带内沿用参考级），实测代价见
+# `E:\WorkBuddy-Work\scripts\analyze_foot_state_flip.py` 的「改判帧」列。
+FOOT_CLIP_HYST_PX = 12.0      # 已判「脚出画」后，底边须再往回收这么多像素才恢复
 MIN_CONTACT_ANGLE_DEG = 1.0   # 接触点法的最小俯角：低于此值地面交点趋近无穷远
 MUTUAL_CHECK_RATIO = 0.30     # 双源互检：两法差异超过此比例即标「存疑」
 
@@ -742,6 +794,98 @@ def compute_box_visibility(box: dict, image_size,
         aspect=(w / h) if h > 0 else 0.0,
         checked=True,
     )
+
+
+class FootClipHysteresis:
+    """「脚是否已出画」的**带记忆**判定 —— 治方法逐帧横跳（2026-09-26）。
+
+    问题（实录量化，`E:\\WorkBuddy-Work\\scripts\\analyze_foot_state_flip.py`）
+    -------------------------------------------------------------------------
+    原先 `touches_bottom` 是一个**无记忆的硬阈值**：`y2 >= img_h - 12`。而实测
+    底边帧间抖动中位 2.5~4.0 px、P90 11~17 px、最大 25~45 px（四个「人从远处
+    走回镜头」会话），阈值线正好落在这片抖动里：四个会话分别翻转
+    **26 / 28 / 34 / 20** 次。每一次翻转都是一次方法切换，而两侧读数差得很远：
+
+    * 接触点法 —— 精确级，但脚出画时读到的是检测器截出来的**假底边**，
+      任何比几何下限更近的距离都被算成下限（~1.95 m，实测整段冻结）；
+    * 宽度法 —— 参考级（`Z = fx·肩宽/框宽`），给出 1.3~1.6 m。
+
+    于是距离序列在 1.4 / 1.95 之间逐帧交替，**相邻帧斜率可达 3.9 m/s**，
+    把一切吃距离序列求导的下游（TTC / 速度 / 趋势）整体毒化。
+
+    为什么靠滤波解决不了
+    --------------------
+    中值窗压的是**单帧孤立的尖刺**；而这里是「边界处连续多帧来回切」——
+    持续性的、方向上交替的、不是孤立尖刺。窗口只能把它延后（群延迟），
+    消不掉。
+
+    滞回怎么治
+    ----------
+    进入与退出用**两条不同的线**，中间是缓冲带，状态在带内保持不变：
+
+    * 进入「脚出画」：``y2 >= img_h - tol_px``（= 468，与原硬阈值**完全相同**，
+      所以「假底边不能当真脚」那条已验收的修复一字未改）；
+    * 退出（脚回到画面内）：``y2 <= img_h - tol_px - hyst_px``（= 456）;
+    * 带内（456 < y2 < 468）：**保持上一帧状态** —— 这就是「记忆」。
+
+    效果是把 N 次翻转收敛成 1 次真实过境。真实过境仍有跳变，但只有一次，
+    后续由 `core/ranging_filter.py` 的中值+One Euro 平滑掉。
+
+    语义边界（重要）
+    ----------------
+    * 「无目标」（``y2 is None``）**保持状态，不当成脚的回落** —— 目标暂时丢失
+      不等于脚回到了画面里。上层另有丢失重锚（`SpeedGate`）。
+    * 「换人 / 换目标」要显式 ``reset``，否则新目标的初始状态会继承旧轨迹。
+    * 它**只回答「脚出没出画」这一个问题**，不参与「框是否完整」的其它判断
+      （顶边、左右边、宽高比一律仍按逐帧体检走）。
+    """
+
+    def __init__(self, tol_px: float = FOOT_CLIP_TOL_PX,
+                 hyst_px: float = FOOT_CLIP_HYST_PX):
+        if hyst_px < 0:
+            raise ValueError('hyst_px 不能为负（负值会让退出线落在进入线下方，'
+                             '状态将永不退出）')
+        self.tol_px = float(tol_px)
+        self.hyst_px = float(hyst_px)
+        self._state: dict = {}
+
+    # -- 只读视图（测试与诊断用，不参与判定）--
+    def line(self, img_h: float) -> Tuple[float, float]:
+        """返回 ``(进入线, 退出线)`` 的绝对行号，便于日志与测试核对。"""
+        enter = float(img_h) - self.tol_px
+        return enter, enter - self.hyst_px
+
+    def state(self, key) -> bool:
+        """当前状态（未见过该 key 时为 False）。"""
+        return bool(self._state.get(key, False))
+
+    def update(self, key, y2: Optional[float], img_h: Optional[float]) -> bool:
+        """喂入本帧底边行号，返回本帧的「脚出画」判定（含记忆）。
+
+        ``y2`` 为 ``None``（无目标）或 ``img_h`` 无效时**保持状态不变**。
+        """
+        st = bool(self._state.get(key, False))
+        if y2 is None or not img_h or float(img_h) <= 0:
+            self._state[key] = st
+            return st
+        enter, exit_ = self.line(float(img_h))
+        if y2 >= enter:
+            st = True
+        elif y2 <= exit_:
+            st = False
+        self._state[key] = st
+        return st
+
+    def reset(self, key=None) -> None:
+        """清状态。``key=None`` 清全部（换目标 / 回放跳转 / 换视频源时调用）。"""
+        if key is None:
+            self._state.clear()
+        else:
+            self._state.pop(key, None)
+
+    def snapshots(self) -> dict:
+        """当前所有 key 的状态快照（诊断用）。"""
+        return dict(self._state)
 
 
 def distance_from_ground_contact(v_bottom: float, intrinsics,
@@ -874,9 +1018,19 @@ class GeometricRanger:
     """
 
     def __init__(self, intrinsics: CameraIntrinsics,
-                 config: Optional[RangingConfig] = None):
+                 config: Optional[RangingConfig] = None,
+                 hysteresis: Optional[FootClipHysteresis] = None):
         self.intrinsics = intrinsics
         self.config = config or RangingConfig()
+        # 「脚是否出画」的带记忆判定（2026-09-26 治本）。
+        # 传 None 则退回无记忆硬阈值（旧行为）—— 单帧调用、离线测试用得上；
+        # 实时链路**必须**给一个，否则方法会在阈值线上逐帧横跳（见该类 docstring）。
+        self.hysteresis = hysteresis
+
+    def reset_foot_state(self, key=None) -> None:
+        """清「脚出画」状态。换目标 / 回放跳转 / 换视频源时调用。"""
+        if self.hysteresis is not None:
+            self.hysteresis.reset(key)
 
     def update_intrinsics(self, intrinsics: CameraIntrinsics) -> None:
         self.intrinsics = intrinsics
@@ -958,7 +1112,8 @@ class GeometricRanger:
         return float(fx * self.config.person_width_m / pixel_width)
 
     def measure_from_box(self, box: dict, class_name: str = '',
-                         image_size=None) -> RangingResult:
+                         image_size=None, track_key: Optional[str] = None
+                         ) -> RangingResult:
         """综合入口：先体检可见性，再选方法出数，最后两法互检。
 
         优先级（接触点法优先，因为它不依赖目标高度）::
@@ -972,9 +1127,19 @@ class GeometricRanger:
             都不行               -> 不可测，并把原因说到点子上
 
         **绝不返回兜底数字**：拿不到可靠值就明确说「不可测」。
+
+        ``track_key``：传给 ``FootClipHysteresis`` 的状态键。默认用归一化后的
+        类别名 —— 不同类别（人 / 椅子）各自维护状态，互不污染。
+        本项目的定位是**单目标帧间守卫**（CHARTER「范围内的」第 5 条），
+        同类多目标不在范围内；真需要时由调用方传显式 key。
         """
         if not self.intrinsics.is_valid():
             return RangingResult(reason='相机未标定')
+
+        # 类别名归一化：标签文件可能给中文（coco_labels_cn.txt），而下面的
+        # 宽度法门 / 身高表 / 宽高比表全部按规范英文名匹配（2026-09-25 22:14
+        # 录制实证：不归一化时 person 专属逻辑整体静默失效）。
+        class_name = canonical_class_name(class_name)
 
         h_px = float(box.get('height', 0.0))
         w_px = float(box.get('width', 0.0))
@@ -986,6 +1151,22 @@ class GeometricRanger:
         vis = compute_box_visibility(box, image_size)
         bottom_v = float(box.get('y', 0.0)) + h_px / 2.0
 
+        # ---- 「脚是否已出画」的**带记忆**判定（2026-09-26 治本）------------
+        # 无记忆的硬阈值会让方法在阈值线上逐帧横跳（实测四个会话翻转
+        # 26/28/34/20 次，读数在 1.4 / 1.95 m 之间交替，相邻帧斜率 3.9 m/s）。
+        # 滞回在带内保持上一状态，把 N 次翻转收敛成 1 次真实过境。
+        # 进入线与原硬阈值完全相同 → 「假底边不能当真脚」那条修复未被改动。
+        #
+        # 未配置滞回（离线单帧测试）或没做体检时退回 ``vis.touches_bottom``，
+        # 即完全等于旧行为 —— 保证既有回归的语义不变。
+        foot_out = vis.touches_bottom
+        if (self.hysteresis is not None and vis.checked
+                and image_size is not None):
+            img_h = float(image_size[1])
+            foot_out = self.hysteresis.update(
+                track_key if track_key is not None else class_name,
+                bottom_v, img_h)
+
         # ---- 主力判据：框底边到底能不能踩在地面上 ----
         # 实测三种「旧实现会输出错值」的情形全部靠这一段拦下：
         #     被挡到腰（底边落在画面中心线上方）-> bottom_may_touch_ground 硬判据
@@ -996,7 +1177,7 @@ class GeometricRanger:
         # 前提「框上边 == 目标头顶、下边 == 脚」只在上下边都没被画面裁掉时
         # 成立。上边被裁 -> 反解出的身高必然偏小；下边被裁 -> 底边不是脚，
         # 交给后面的边界门控给出更准确的理由（「脚被画面下边界裁掉」）。
-        if (vis.checked and not vis.touches_top and not vis.touches_bottom
+        if (vis.checked and not vis.touches_top and not foot_out
                 and self.config.camera_height > 0
                 and self.intrinsics.is_valid()):
             if not bottom_may_touch_ground(bottom_v, self.intrinsics.cy,
@@ -1023,8 +1204,10 @@ class GeometricRanger:
         # 「站立的人 0.15~0.75」的宽高比先验（贴脸时框占满画面、宽高比 >1），
         # 若先过体检会把宽度法唯一能出数的路径整个拦掉。
         #
-        # 触发条件是 ``vis.touches_bottom``：底边距画面底边 ≤ FOOT_CLIP_TOL_PX
-        # （12 px）。为什么不能像以前那样只认「底边真的贴到 480」—— YOLO 在
+        # 触发条件是 ``foot_out``（= 滞回判定；无滞回时等于 ``vis.touches_bottom``）：
+        # 底边距画面底边 ≤ FOOT_CLIP_TOL_PX（12 px）即进入，且**进入后要退回到
+        # 468−FOOT_CLIP_HYST_PX 才恢复** —— 见 ``FootClipHysteresis`` docstring。
+        # 为什么不能像以前那样只认「底边真的贴到 480」—— YOLO 在
         # 画面底缘欠检 5~16 px，被裁的脚给出的假底边落在 464~475，2 px 容差
         # 永远拦不住；接触点法读到假底边就会把任何 <1.9 m 的距离算成几何下限
         # ~1.9 m（19:45 录制：用户从 2 m 走回贴脸，整段读数冻结在 1.9 附近）。
@@ -1051,7 +1234,7 @@ class GeometricRanger:
         # ① 的理由：「脚是否出画」这件事本身要靠安装参数才判得准（见 1.85 m 那个
         # 临界）；安装参数没填时，全链路本来就给不出任何距离，这时最有用的一句话
         # 是「去填/去自标定安装参数」，而不是先给一个来路不明的参考值。
-        if vis.touches_bottom:
+        if foot_out:
             if (class_name == 'person' and self.config.camera_height > 0
                     and top_may_be_head(
                         bottom_v - h_px, self.intrinsics.cy, self.intrinsics.fy,
@@ -1117,6 +1300,13 @@ class GeometricRanger:
                 reason='框底边贴近画面底缘，无法确认目标底端（脚）未被裁：'
                        '目标可能较近，也可能恰好站在最近可测距离上；'
                        '为保证不出错值，此帧不给数')
+
+        # ---- 以下都在「脚未出画」的前提下执行 -------------------------------
+        # 上面那个 ``if foot_out:`` 块每条分支都 return，所以走到这里必有
+        # ``foot_out is False``；而滞回的退出线在进入线**上方**，因此
+        # ``foot_out`` 为假 ⇒ ``vis.touches_bottom`` 也为假 ⇒ 下面用到的
+        # ``height_method_ok`` / ``ground_contact_ok`` 都成立（已体检时）。
+        # 滞回只覆盖「脚出画」这一个判定，其它边一律仍按逐帧体检走。
 
         # ---- 兜底体检：宽高比（判别力有限，不作主力） ----
         # 实测被挡到腰 0.56、只有下巴 0.60 都落在「站立的人」区间内，全部逃过；

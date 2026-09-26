@@ -376,6 +376,46 @@ QLineEdit, QTextEdit {
                    </widget>
                   </item>
                   <item>
+                   <layout class="QHBoxLayout" name="horizontalLayout_ttc">
+                    <item>
+                     <widget class="QLabel" name="label_ttc_title">
+                      <property name="text">
+                       <string>碰撞预警：</string>
+                      </property>
+                      <property name="alignment">
+                       <set>Qt::AlignmentFlag::AlignCenter</set>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QLabel" name="label_ttc_value">
+                      <property name="text">
+                       <string>--</string>
+                      </property>
+                      <property name="alignment">
+                       <set>Qt::AlignmentFlag::AlignCenter</set>
+                      </property>
+                      <property name="styleSheet">
+                       <string notr="true">font-weight: bold; font-size: 12pt;</string>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </item>
+                  <item>
+                   <widget class="QLabel" name="label_ttc_reason">
+                    <property name="text">
+                     <string/>
+                    </property>
+                    <property name="wordWrap">
+                     <bool>true</bool>
+                    </property>
+                    <property name="styleSheet">
+                     <string notr="true">font-size: 9pt;</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item>
                    <layout class="QHBoxLayout" name="horizontalLayout_mount">
                     <item>
                      <widget class="QLabel" name="label_known_dist">
@@ -604,7 +644,7 @@ QLineEdit, QTextEdit {
               <item>
                <widget class="QGroupBox" name="groupBox_7">
                 <property name="title">
-                 <string>目标位置分析</string>
+                 <string>TTC分析</string>
                 </property>
                 <layout class="QVBoxLayout" name="verticalLayout_16">
                  <item>
@@ -652,14 +692,35 @@ QLineEdit, QTextEdit {
               <item>
                <widget class="QGroupBox" name="groupBox_8">
                 <property name="title">
-                 <string>目标尺寸与距离分析</string>
+                 <string>目标距离分析</string>
                 </property>
-                <layout class="QHBoxLayout" name="horizontalLayout_5">
-                 <item>
-                  <widget class="PlotWidget" name="plot_sensor_shap" native="true"/>
-                 </item>
+                <layout class="QVBoxLayout" name="verticalLayout_26">
                  <item>
                   <widget class="PlotWidget" name="plot_target_distance" native="true"/>
+                 </item>
+                 <item>
+                  <layout class="QHBoxLayout" name="horizontalLayout_35" stretch="2,8">
+                   <item>
+                    <widget class="QLabel" name="label_42">
+                     <property name="text">
+                      <string>提示：</string>
+                     </property>
+                     <property name="alignment">
+                      <set>Qt::AlignmentFlag::AlignCenter</set>
+                     </property>
+                    </widget>
+                   </item>
+                   <item>
+                    <widget class="QLabel" name="label_method_prompt">
+                     <property name="text">
+                      <string>TextLabel</string>
+                     </property>
+                     <property name="alignment">
+                      <set>Qt::AlignmentFlag::AlignCenter</set>
+                     </property>
+                    </widget>
+                   </item>
+                  </layout>
                  </item>
                 </layout>
                </widget>
@@ -955,16 +1016,6 @@ QLineEdit, QTextEdit {
                   <item>
                    <property name="text">
                     <string>最高置信度</string>
-                   </property>
-                  </item>
-                  <item>
-                   <property name="text">
-                    <string>最大面积</string>
-                   </property>
-                  </item>
-                  <item>
-                   <property name="text">
-                    <string>最接近中心</string>
                    </property>
                   </item>
                   <item>

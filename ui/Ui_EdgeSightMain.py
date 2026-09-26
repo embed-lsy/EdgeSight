@@ -320,6 +320,31 @@ class Ui_Form(object):
 
         self.verticalLayout_5.addWidget(self.label_distance_reason)
 
+        self.horizontalLayout_ttc = QHBoxLayout()
+        self.horizontalLayout_ttc.setObjectName(u"horizontalLayout_ttc")
+        self.label_ttc_title = QLabel(self.groupBox_targetpos)
+        self.label_ttc_title.setObjectName(u"label_ttc_title")
+        self.label_ttc_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.horizontalLayout_ttc.addWidget(self.label_ttc_title)
+
+        self.label_ttc_value = QLabel(self.groupBox_targetpos)
+        self.label_ttc_value.setObjectName(u"label_ttc_value")
+        self.label_ttc_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_ttc_value.setStyleSheet(u"font-weight: bold; font-size: 12pt;")
+
+        self.horizontalLayout_ttc.addWidget(self.label_ttc_value)
+
+
+        self.verticalLayout_5.addLayout(self.horizontalLayout_ttc)
+
+        self.label_ttc_reason = QLabel(self.groupBox_targetpos)
+        self.label_ttc_reason.setObjectName(u"label_ttc_reason")
+        self.label_ttc_reason.setWordWrap(True)
+        self.label_ttc_reason.setStyleSheet(u"font-size: 9pt;")
+
+        self.verticalLayout_5.addWidget(self.label_ttc_reason)
+
         self.horizontalLayout_mount = QHBoxLayout()
         self.horizontalLayout_mount.setObjectName(u"horizontalLayout_mount")
         self.label_known_dist = QLabel(self.groupBox_targetpos)
@@ -529,17 +554,31 @@ class Ui_Form(object):
 
         self.groupBox_8 = QGroupBox(self.frame_2)
         self.groupBox_8.setObjectName(u"groupBox_8")
-        self.horizontalLayout_5 = QHBoxLayout(self.groupBox_8)
-        self.horizontalLayout_5.setObjectName(u"horizontalLayout_5")
-        self.plot_sensor_shap = PlotWidget(self.groupBox_8)
-        self.plot_sensor_shap.setObjectName(u"plot_sensor_shap")
-
-        self.horizontalLayout_5.addWidget(self.plot_sensor_shap)
-
+        self.verticalLayout_26 = QVBoxLayout(self.groupBox_8)
+        self.verticalLayout_26.setObjectName(u"verticalLayout_26")
         self.plot_target_distance = PlotWidget(self.groupBox_8)
         self.plot_target_distance.setObjectName(u"plot_target_distance")
 
-        self.horizontalLayout_5.addWidget(self.plot_target_distance)
+        self.verticalLayout_26.addWidget(self.plot_target_distance)
+
+        self.horizontalLayout_35 = QHBoxLayout()
+        self.horizontalLayout_35.setObjectName(u"horizontalLayout_35")
+        self.label_42 = QLabel(self.groupBox_8)
+        self.label_42.setObjectName(u"label_42")
+        self.label_42.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.horizontalLayout_35.addWidget(self.label_42)
+
+        self.label_method_prompt = QLabel(self.groupBox_8)
+        self.label_method_prompt.setObjectName(u"label_method_prompt")
+        self.label_method_prompt.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.horizontalLayout_35.addWidget(self.label_method_prompt)
+
+        self.horizontalLayout_35.setStretch(0, 2)
+        self.horizontalLayout_35.setStretch(1, 8)
+
+        self.verticalLayout_26.addLayout(self.horizontalLayout_35)
 
 
         self.horizontalLayout_8.addWidget(self.groupBox_8)
@@ -768,8 +807,6 @@ class Ui_Form(object):
         self.horizontalLayout_30.addWidget(self.label_37)
 
         self.combo_target_select_rule = QComboBox(self.groupBox_12)
-        self.combo_target_select_rule.addItem("")
-        self.combo_target_select_rule.addItem("")
         self.combo_target_select_rule.addItem("")
         self.combo_target_select_rule.addItem("")
         self.combo_target_select_rule.setObjectName(u"combo_target_select_rule")
@@ -1183,6 +1220,9 @@ class Ui_Form(object):
         self.label_distance_title.setText(QCoreApplication.translate("Form", u"\u76ee\u6807\u8ddd\u79bb\uff1a", None))
         self.label_distance_value.setText(QCoreApplication.translate("Form", u"\u4e0d\u53ef\u6d4b", None))
         self.label_distance_reason.setText("")
+        self.label_ttc_title.setText(QCoreApplication.translate("Form", u"\u78b0\u649e\u9884\u8b66\uff1a", None))
+        self.label_ttc_value.setText(QCoreApplication.translate("Form", u"--", None))
+        self.label_ttc_reason.setText("")
         self.label_known_dist.setText(QCoreApplication.translate("Form", u"\u5df2\u77e5\u8ddd\u79bb\uff08m\uff09\uff1a", None))
         self.btn_mark_known.setText(QCoreApplication.translate("Form", u"\u8bb0\u4e3a\u91c7\u6837\u70b9", None))
         self.btn_solve_mount.setText(QCoreApplication.translate("Form", u"\u6c42\u89e3\u5b89\u88c5\u53c2\u6570", None))
@@ -1196,10 +1236,12 @@ class Ui_Form(object):
         self.label_21.setText(QCoreApplication.translate("Form", u"\u63a8\u7406FPS\uff1a", None))
         self.label_9.setText(QCoreApplication.translate("Form", u"\u753b\u9762FPS\uff1a", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_monitor), QCoreApplication.translate("Form", u"\u76d1\u89c6", None))
-        self.groupBox_7.setTitle(QCoreApplication.translate("Form", u"\u76ee\u6807\u4f4d\u7f6e\u5206\u6790", None))
+        self.groupBox_7.setTitle(QCoreApplication.translate("Form", u"TTC\u5206\u6790", None))
         self.label_5.setText(QCoreApplication.translate("Form", u"\u63d0\u793a\uff1a", None))
         self.label_prompt.setText(QCoreApplication.translate("Form", u"TextLabel", None))
-        self.groupBox_8.setTitle(QCoreApplication.translate("Form", u"\u76ee\u6807\u5c3a\u5bf8\u4e0e\u8ddd\u79bb\u5206\u6790", None))
+        self.groupBox_8.setTitle(QCoreApplication.translate("Form", u"\u76ee\u6807\u8ddd\u79bb\u5206\u6790", None))
+        self.label_42.setText(QCoreApplication.translate("Form", u"\u63d0\u793a\uff1a", None))
+        self.label_method_prompt.setText(QCoreApplication.translate("Form", u"TextLabel", None))
         self.groupBox_9.setTitle(QCoreApplication.translate("Form", u"\u7f6e\u4fe1\u5ea6\u5206\u6790", None))
         self.label_6.setText(QCoreApplication.translate("Form", u"\u63d0\u793a\uff1a", None))
         self.label_conf.setText(QCoreApplication.translate("Form", u"TextLabel", None))
@@ -1224,9 +1266,7 @@ class Ui_Form(object):
         self.groupBox_12.setTitle(QCoreApplication.translate("Form", u"\u68c0\u6d4b\u914d\u7f6e", None))
         self.label_37.setText(QCoreApplication.translate("Form", u"\u76ee\u6807\u9009\u62e9\u89c4\u5219\uff1a", None))
         self.combo_target_select_rule.setItemText(0, QCoreApplication.translate("Form", u"\u6700\u9ad8\u7f6e\u4fe1\u5ea6", None))
-        self.combo_target_select_rule.setItemText(1, QCoreApplication.translate("Form", u"\u6700\u5927\u9762\u79ef", None))
-        self.combo_target_select_rule.setItemText(2, QCoreApplication.translate("Form", u"\u6700\u63a5\u8fd1\u4e2d\u5fc3", None))
-        self.combo_target_select_rule.setItemText(3, QCoreApplication.translate("Form", u"\u6307\u5b9a\u7c7b\u522b", None))
+        self.combo_target_select_rule.setItemText(1, QCoreApplication.translate("Form", u"\u6307\u5b9a\u7c7b\u522b", None))
 
         self.label_38.setText(QCoreApplication.translate("Form", u"\u6307\u5b9a\u7c7b\u522b\uff1a", None))
         self.label_29.setText(QCoreApplication.translate("Form", u"\u57fa\u51c6\u5bbd\u5ea6\uff1a", None))

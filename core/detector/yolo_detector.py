@@ -130,40 +130,46 @@ class YOLODetector(QObject):
         pred=outputs[0]
         if pred.shape[1]==8400 and pred.shape[2]==84:
             pred=pred.transpose(0,2,1)
+        # 阈值每帧从 global_params 现读（2026-09-26 修复）：构造参数只是初值。
+        # 之前把 conf/nms 拷进 self.conf_thres 后就再不更新，监视页滑块
+        # 形同虚设 —— NMS 阈值只在检测器里生效，完全调不动；置信度阈值
+        # 虽在 UI 层还有一道过滤，但低于阈值的框仍会进 NMS 与目标选择，
+        # 且画面叠加框走的是不过滤的 last_detection（已同日修复）。
+        conf_thres = getattr(self.global_params, 'confidence_thres',
+                             self.conf_thres)
+        nms_thres = getattr(self.global_params, 'nms_thres', self.nms_thres)
         # 调用后处理函数
         if self.model_type == 'v5':
-            detections = postprocess_yolov5(outputs, (w, h), scale, dw, dh, self.conf_thres, self.nms_thres)
+            detections = postprocess_yolov5(outputs, (w, h), scale, dw, dh, conf_thres, nms_thres)
         elif self.model_type == 'v8':
-            detections = postprocess_yolov8(outputs, (w, h), scale, dw, dh, self.conf_thres, self.nms_thres)
+            detections = postprocess_yolov8(outputs, (w, h), scale, dw, dh, conf_thres, nms_thres)
         target = self.select_target(detections, (w, h))
         inference_time = time.time() - start_time
         self.global_params.inference_fps = 1.0/inference_time if inference_time > 0 else 0.0
         self.detection_ready.emit(target)
 
     def select_target(self, detections, img_shape):
-        # 这个方法保持原样
+        """按选择规则从本帧检测里挑出唯一跟踪目标。
+
+        2026-09-26 修复两处：
+        1. 旧版开头有 ``if not self.global_params.detection_conf: return 最高置信度``
+           —— ``detection_conf`` 是**当前目标置信度的显示值**（初值 0.0、
+           无目标帧被清 0），却被当成"规则开关"用。程序启动后它几乎恒为 0，
+           于是设置页选什么规则都静默走最高置信度 —— "检测配置没有生效"
+           的直接原因。现在规则每帧无条件生效。
+        2. 规则精简为两条（用户建议，旧"最大面积/最接近中心"已从 UI 删除）：
+           0 = 最高置信度（默认）；1 = 指定类别（按 specific_class_id 过滤，
+           同类多框取置信度最高，无该类则本帧无目标）。
+           旧值 1/2/3 兜底按规则 0 处理（target_select_rule 不持久化，
+           重启必为 0，不存在旧值残留）。
+        """
         if not detections:
             return None
-        if not self.global_params.detection_conf:
-            return max(detections, key=lambda d: d['confidence'])
-        rule = self.global_params.target_select_rule
-        specific_class = self.global_params.specific_class_id
-        h, w = img_shape[:2]
-        img_center = (w // 2, h // 2)
-        if rule == 0:
-            return max(detections, key=lambda d: d['confidence'])
-        elif rule == 1:
-            return max(detections, key=lambda d: d['width'] * d['height'])
-        elif rule == 2:
-            def distance_to_center(d):
-                cx, cy = d['x'], d['y']
-                return (cx - img_center[0])**2 + (cy - img_center[1])**2
-            return min(detections, key=distance_to_center)
-        elif rule == 3:
+        rule = getattr(self.global_params, 'target_select_rule', 0)
+        if rule == 1:
+            specific_class = getattr(self.global_params, 'specific_class_id', -1)
             filtered = [d for d in detections if d['class_id'] == specific_class]
-            if filtered:
-                return max(filtered, key=lambda d: d['confidence'])
-            else:
+            if not filtered:
                 return None
-        else:
-            return max(detections, key=lambda d: d['confidence'])
+            return max(filtered, key=lambda d: d['confidence'])
+        return max(detections, key=lambda d: d['confidence'])

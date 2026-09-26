@@ -9,8 +9,11 @@ from core.calibration import (CameraCalibrator, CameraIntrinsics,
                               GeometricRanger, RangingConfig, RangingResult,
                               compute_box_visibility, solve_intrinsics,
                               solve_mount_params, save_mount_params,
-                              load_mount_params)
+                              load_mount_params, canonical_class_name,
+                              FootClipHysteresis)
 from core.person_model import PersonFeatureTracker, SpeedGate
+from core.ttc import TTCEstimator, TTCResult, TTCLevel, classify_ttc
+from core.ranging_filter import DistanceFilter
 from core.recorder import Recorder, Replayer, FrameRecord
 # 摄像头设备识别（CHARTER「范围内的」第 1 条：内参按设备记忆）
 from core.camera.device_identity import (IdentityReport, enumerate_cameras,
@@ -25,6 +28,51 @@ import numpy as np
 import pyqtgraph as pg
 import os
 import time
+
+
+# ---------------------------------------------------------------------------
+# 深度分析「距离按类别着色」的颜色表（pyqtgraph 颜色）。
+# 中文标签文件里类别名是「人」「猫」—— 统一走 canonical_class_name
+# 归一化后查表，保证换标签文件颜色不漂移。
+# ---------------------------------------------------------------------------
+_CLASS_PEN_COLORS = {
+    'person': 'g',              # 人：绿（与旧版距离曲线同色，观感延续）
+    'cat': (230, 126, 34),      # 猫：橙
+    'chair': (142, 124, 195),
+    'bicycle': (52, 152, 219),
+    'car': (231, 76, 60),
+}
+_CLASS_PEN_FALLBACK = ['y', 'c', 'm', (210, 180, 140), (128, 200, 160)]
+
+
+def _class_pen_color(cls_name):
+    canon = canonical_class_name(cls_name or '未知')
+    if canon in _CLASS_PEN_COLORS:
+        return _CLASS_PEN_COLORS[canon]
+    return _CLASS_PEN_FALLBACK[hash(canon) % len(_CLASS_PEN_FALLBACK)]
+
+
+# ---------------------------------------------------------------------------
+# 回放曲线「按 TTC 分级分段着色」的调色板。
+# 与监视页 TTC 告警色、分析页阈值虚线**同源同值** —— 同一个分级在哪里都是
+# 同一个颜色，否则"红色到底代表危险还是代表某一类目标"就说不清了。
+# ---------------------------------------------------------------------------
+_TTC_LEVEL_COLORS = {
+    TTCLevel.NONE:     (130, 130, 130),   # 无告警（含未在接近/不可算）：中性灰
+    TTCLevel.CAUTION:  (133, 79, 11),     # 提示  #854F0B
+    TTCLevel.WARNING:  (153, 60, 29),     # 预警  #993C1D
+    TTCLevel.CRITICAL: (163, 45, 45),     # 危险  #A32D2D
+}
+
+
+def _ttc_level_legend_name(level: TTCLevel, cfg) -> str:
+    """图例文字带上阈值，看图就知道颜色对应哪一级、门槛是多少。"""
+    return {
+        TTCLevel.NONE: '无告警',
+        TTCLevel.CAUTION: f'提示 ≤{cfg.ttc_caution:.1f}s',
+        TTCLevel.WARNING: f'预警 ≤{cfg.ttc_warning:.1f}s',
+        TTCLevel.CRITICAL: f'危险 ≤{cfg.ttc_critical:.1f}s',
+    }[level]
 
 
 class CalibSolveThread(QThread):
@@ -116,8 +164,15 @@ class MainWindow(QWidget, Ui_Form):
         # 「用户手工修改」，避免启动时把加载动作当成用户改动又写回一次
         self._loading_mount = False
         # 几何测距器。先无内参构造，load_calibration() 后注入
+        #
+        # 第三个参数是「脚是否出画」的**带记忆**判定（2026-09-26 治本）：
+        # 无记忆的硬阈值会让方法在阈值线上逐帧横跳 —— 实测四个「走回镜头」
+        # 会话翻转 26/28/34/20 次，读数在宽度法 1.4 m 与接触点法假值 1.95 m
+        # 之间交替，相邻帧斜率可达 3.9 m/s，TTC 与趋势估计整体被毒化。
+        # 滞回在缓冲带内保持上一状态，把 N 次翻转收敛成 1 次真实过境。
         self.ranger = GeometricRanger(CameraIntrinsics(),
-                                      RangingConfig.from_params(self.global_params))
+                                      RangingConfig.from_params(self.global_params),
+                                      hysteresis=FootClipHysteresis())
         # ------------------------------------------------------------------
         # 人特征档案 + 速度门控（2026-09-25 P1+：近场宽度法的两大支柱）
         # ------------------------------------------------------------------
@@ -129,6 +184,20 @@ class MainWindow(QWidget, Ui_Form):
             self.global_params.person_profile_path)
         self._speed_gate = SpeedGate()
         self._last_profile_key = ''     # 防止建档提示刷屏
+        # ------------------------------------------------------------------
+        # TTC 碰撞预警（2026-09-25，CHARTER「范围内的」第 5 条实时接入）
+        # ------------------------------------------------------------------
+        # 与离线分析（analyze_recording）共用同一个 TTCEstimator 类 ——
+        # UI 侧零新逻辑，只是把检测回调里的距离序列喂进去。喂的是
+        # **门控后的距离**：速度门控拦截的帧按「测距不可用」处理，
+        # 不会让被拦的错值毒化速度估计。
+        self._ttc = TTCEstimator()
+        self._last_ttc_style = ''       # 分级色变了才 setStyleSheet（防每帧重绘）
+        # 距离去噪（2026-09-26）：中值3+One Euro 串联，见 core/ranging_filter.py。
+        # 滤波紧跟测距，输出的**规范距离是全链路唯一距离值** —— 速度门控、
+        # 人特征档案、监视页读数、TTC、深度分析曲线、录制轨存的全都是它；
+        # 原始值只作诊断字段留在录制里（distance_raw），实时逻辑一律不读。
+        self._dist_filter = DistanceFilter()
         # 最后一帧的测距结果：标定判定被**异步复核**（相机打开完成）时要用它把
         # 原因行/悬停**原样重画**，不能拿 None 去刷 —— 否则读数文字留着上一帧的
         # 值、原因行却被擦空，界面变成「不可测」+ 没有原因（实测偶发踩到）
@@ -143,18 +212,24 @@ class MainWindow(QWidget, Ui_Form):
         self._rec_seq = 0             # 录制帧序号
         self._rec_t0 = 0.0            # 录制起始时刻，用于数据轨时间戳
 
-        # 初始化存储图表的环形缓冲区
+        # 初始化存储图表的环形缓冲区。
+        # 2026-09-26 改版：目标位置/尺寸图删除，新增 TTC / 方法 / 类别轨迹。
+        # 距离历史存**规范值**（去噪后，与监视页读数、TTC、判定同源）；
+        # 类别与方法逐帧并行记录 —— 类别给距离曲线着色，方法只喂下方提示行
+        # （2026-09-26：图上那几条方法竖虚线已删，见 init_analysis_plots 的注释）。
         self.history_len = 100
-        self.sensor_history_x = deque(maxlen=self.history_len)
-        self.sensor_history_y = deque(maxlen=self.history_len)
-        self.sensor_history_wide = deque(maxlen=self.history_len)
-        self.sensor_history_hight = deque(maxlen=self.history_len)
         self.sensor_history_conf = deque(maxlen=self.history_len)
         self.sensor_history_conf_thres = deque(maxlen=self.history_len)
         self.sensor_history_fps = deque(maxlen=self.history_len)
         self.target_distance = deque(maxlen=self.history_len)
+        self.class_history = deque(maxlen=self.history_len)
+        self.method_history = deque(maxlen=self.history_len)
+        self.ttc_history = deque(maxlen=self.history_len)
+        self.ttc_reason_history = deque(maxlen=self.history_len)
         self.time_history = deque(maxlen=self.history_len)
         self.time_counter = 0.0
+        self._dist_curves = {}       # 类别名 -> 距离曲线
+        self._ttc_threshold_lines = []   # [(y, InfiniteLine, TextItem)]
         # 初始化状态栏
         self.status_bar=QStatusBar(self)
         self.layout().addWidget(self.status_bar)
@@ -180,16 +255,15 @@ class MainWindow(QWidget, Ui_Form):
         self.init_ui()
         # 先为每个plot控件添加图例，确保曲线名字能显示
         self.plot_sensor_center.addLegend()
-        self.plot_sensor_shap.addLegend()
         self.plot_sensor_conf.addLegend()
         self.plot_target_distance.addLegend()
         self.plot_sensor_fps.addLegend()
         # 初始化分析曲线控件（确保UI已setupUi）
-        self._plot_sensor_curve_x = self.plot_sensor_center.plot([], [], pen=pg.mkPen('r', width=2), name="检测框X坐标")
-        self._plot_sensor_curve_y = self.plot_sensor_center.plot([], [], pen=pg.mkPen('g', width=2), name="检测框Y坐标")
-        self._plot_sensor_curve_wide = self.plot_sensor_shap.plot([], [], pen=pg.mkPen('c', width=2), name="检测框宽度")
-        self._plot_sensor_curve_hight = self.plot_sensor_shap.plot([], [], pen=pg.mkPen('m', width=2), name="检测框高度")
-        self._plot_target_distance = self.plot_target_distance.plot([], [], pen=pg.mkPen('g', width=2), name="目标距离")
+        # 2026-09-26 改版：原「目标位置分析」(x/y曲线) 改为 TTC 曲线，分级
+        # 阈值虚线在 init_analysis_plots 里加；原「尺寸+距离」两图合并为单张
+        # 距离图，曲线按目标类别着色、惰性创建（见 update_analysis_plots）。
+        self._plot_ttc_curve = self.plot_sensor_center.plot(
+            [], [], pen=pg.mkPen('g', width=2), name="TTC")
         self._plot_sensor_curve_conf = self.plot_sensor_conf.plot([], [], pen=pg.mkPen('b', width=2), name="检测框置信度")
         self._plot_sensor_curve_conf_thres = self.plot_sensor_conf.plot([], [], pen=pg.mkPen('r', width=2, style=Qt.DashLine), name="置信度阈值")
         self._plot_sensor_curve_fps = self.plot_sensor_fps.plot([], [], pen=pg.mkPen('y', width=2), name="检测框FPS")
@@ -264,6 +338,9 @@ class MainWindow(QWidget, Ui_Form):
     #摄像头线程启动
     def async_init_camera(self):
         self.status_bar.showMessage("正在初始化摄像头...")
+        # 换视频源 = 换场景：「脚是否出画」的滞回状态属于上一段画面，必须清掉，
+        # 否则新场景开头几帧会继承旧状态的判断（2026-09-26）。
+        self.ranger.reset_foot_state()
         self.camera_thread = CameraInitThread(self.camera_index, self.global_params.fps)#摄像头初始化实例
         self.camera_thread.init_finished.connect(self.on_camera_init_finished)#绑定结束信号到回调函数，子线程和主线程通信的关键
         self.camera_thread.start()#启动后再run运行
@@ -360,64 +437,125 @@ class MainWindow(QWidget, Ui_Form):
         if self._analysis_plot_inited and self.global_params.plot_enable:
             return
         self._analysis_plot_inited=True
-        # 绘图控件名以 ui/EdgeSightMain.ui 为准（plot_sensor/plot_error/plot_control
-        # 是旧版命名，命名修正后已不存在，引用会直接 AttributeError）
-        for plt in [self.plot_sensor_center, self.plot_sensor_shap,
-                    self.plot_target_distance, self.plot_sensor_conf,
-                    self.plot_sensor_fps]:
+        # 绘图控件名以 ui/EdgeSightMain.ui 为准（2026-09-26 改版：
+        # plot_sensor_shap 已随「目标尺寸」图一起删除，引用会 AttributeError）
+        for plt in [self.plot_sensor_center, self.plot_target_distance,
+                    self.plot_sensor_conf, self.plot_sensor_fps]:
             plt.showGrid(x=True, y=True)
             plt.setLabel('bottom', '时间')
-            plt.setLabel('left', '数值')
-            plt.addLegend()
             plt.setMouseEnabled(x=True, y=True)
+        self.plot_sensor_center.setLabel('left', 'TTC (s)')
+        self.plot_target_distance.setLabel('left', '距离 (m)')
+        self.plot_sensor_conf.setLabel('left', '数值')
+        self.plot_sensor_fps.setLabel('left', '数值')
+        # TTC 分级阈值虚线（与 core/ttc.py 的 TTCConfig 同源，不另写一份数值）。
+        # 标签用 ignoreBounds=True 加入：pyqtgraph 0.14 的 TextItem.dataBounds
+        # 返回的是**锚点**，会被 ViewBox 当作一个数据点算进自动量程；而这些标签
+        # 又要贴着「当前视野右缘/顶部」摆，于是量程推标签、标签再推量程 ——
+        # 实测（probe_textitem_autorange.py）24 次刷新把 X 轴从 6.2 s 推到
+        # 17.0 s，一路往外爬。ignoreBounds 让虚线只画、不参与量程。
+        # 颜色与监视页 TTC 告警色一致（提示=琥珀 #854F0B、预警=#993C1D、危险=#A32D2D）。
+        if not self._ttc_threshold_lines:
+            cfg = self._ttc.cfg
+            for y, color, name in (
+                    (cfg.ttc_caution, '#854F0B', '提示'),
+                    (cfg.ttc_warning, '#993C1D', '预警'),
+                    (cfg.ttc_critical, '#A32D2D', '危险')):
+                line = pg.InfiniteLine(
+                    pos=y, angle=0,
+                    pen=pg.mkPen(color, style=Qt.DashLine, width=1))
+                txt = pg.TextItem(f'{name} {y:.1f}s', color=color, anchor=(1, 1))
+                self.plot_sensor_center.addItem(line, ignoreBounds=True)
+                self.plot_sensor_center.addItem(txt, ignoreBounds=True)
+                self._ttc_threshold_lines.append((y, line, txt))
         # 曲线对象已在__init__初始化，这里只需清空数据
-        self._plot_sensor_curve_x.setData([], [])
-        self._plot_sensor_curve_y.setData([], [])
-        self._plot_sensor_curve_wide.setData([], [])
-        self._plot_sensor_curve_hight.setData([], [])
+        self._plot_ttc_curve.setData([], [])
         self._plot_sensor_curve_conf.setData([], [])
-        self._plot_sensor_curve_fps.setData([], [])
-        self._plot_target_distance.setData([], [])
         self._plot_sensor_curve_conf_thres.setData([], [])
-       
+        self._plot_sensor_curve_fps.setData([], [])
+        for curve in self._dist_curves.values():
+            curve.setData([], [])
+        # 距离图**不再画方法切换竖虚线**（2026-09-26）：竖线的标签是普通 TextItem，
+        # 它的 dataBounds 返回锚点 (0,1)，被 ViewBox 当成数据点 (x, 文字位置+1)
+        # 算进 Y 量程；而位置又取自"当前视野顶 × 0.95"，形成正反馈
+        # y ← 0.95·y + 1 + padding，收敛点约 30 m —— 0.5~4 m 的曲线被压成一条直线、
+        # 标签全飘到 30 m 处互相重叠。方法信息改由下方提示行承载（同样的信息、
+        # 不碰坐标轴）。TTC 阈值虚线保留，但标签已 ignoreBounds 处理。
+
     def update_analysis_plots(self):
         if not self._analysis_plot_inited and self.global_params.plot_enable:
             return
-        # 更新曲线
-        self._plot_sensor_curve_x.setData(list(self.time_history), list(self.sensor_history_x))
-        self._plot_sensor_curve_y.setData(list(self.time_history), list(self.sensor_history_y))
-        self._plot_sensor_curve_wide.setData(list(self.time_history), list(self.sensor_history_wide))
-        self._plot_sensor_curve_hight.setData(list(self.time_history), list(self.sensor_history_hight))
-        self._plot_sensor_curve_conf.setData(list(self.time_history), list(self.sensor_history_conf))
-        self._plot_sensor_curve_fps.setData(list(self.time_history), list(self.sensor_history_fps))
-        self._plot_target_distance.setData(list(self.time_history), list(self.target_distance))
-        self._plot_sensor_curve_conf_thres.setData(list(self.time_history), list(self.sensor_history_conf_thres))
-        # 更新提示（历史为空时直接返回，否则 last_x 未定义抛 UnboundLocalError，
-        # 分析定时器每 50ms 触发一次，会刷屏报错）
-        if len(self.sensor_history_x) == 0:
-            self.label_prompt.setText('暂无目标数据')
-            # 空状态下置信度状态不能沿用上一轮的"正常"，否则自相矛盾
+        ts = list(self.time_history)
+        # TTC 曲线 + 阈值线标签（标签贴视野右上角，随缩放/平移跟随）
+        self._plot_ttc_curve.setData(ts, list(self.ttc_history))
+        vr = self.plot_sensor_center.getViewBox().viewRange()
+        for y, _line, txt in self._ttc_threshold_lines:
+            txt.setPos(vr[0][1], y)
+        # 距离曲线：一条曲线一个类别，颜色固定映射（图例即类别名）
+        series = {}
+        for t, d, c in zip(ts, self.target_distance, self.class_history):
+            series.setdefault(c or '未知', []).append((t, d))
+        for cls, pts in series.items():
+            curve = self._dist_curves.get(cls)
+            if curve is None:
+                curve = self.plot_target_distance.plot(
+                    [], [], pen=pg.mkPen(_class_pen_color(cls), width=2), name=cls)
+                self._dist_curves[cls] = curve
+            curve.setData([p[0] for p in pts], [p[1] for p in pts])
+        for cls, curve in self._dist_curves.items():
+            if cls not in series:
+                curve.setData([], [])       # 该类别滚出窗口后清空
+        # 方法信息只走下方提示行（图上不再画竖虚线，理由见 init_analysis_plots）
+        # 置信度 / FPS 曲线
+        self._plot_sensor_curve_conf.setData(ts, list(self.sensor_history_conf))
+        self._plot_sensor_curve_conf_thres.setData(ts, list(self.sensor_history_conf_thres))
+        self._plot_sensor_curve_fps.setData(ts, list(self.sensor_history_fps))
+        # 更新提示行
+        if not ts:
+            self.label_prompt.setText('暂无TTC数据')
+            if hasattr(self, 'label_method_prompt'):
+                self.label_method_prompt.setText('暂无测距数据')
             self.label_conf.setText('—')
             return
-        last_x = self.sensor_history_x[-1]
-        last_y = self.sensor_history_y[-1]
-        warnings = []
-        if last_x < 50:
-            warnings.append("左侧丢失风险")
-        elif last_x > 590:
-            warnings.append("右侧丢失风险")
-        if last_y < 40:
-            warnings.append("顶部丢失风险")
-        elif last_y > 440:
-            warnings.append("底部丢失风险")
-        self.label_prompt.setText(" | ".join(warnings) if warnings else "位置正常")
-        
+        self._refresh_ttc_hint()
+        if hasattr(self, 'label_method_prompt'):
+            m = self.method_history[-1] if self.method_history else None
+            if m and m != '不可测':
+                self.label_method_prompt.setText(f'当前测距方法：{m}')
+            elif m == '不可测':
+                self.label_method_prompt.setText(
+                    '当前测距方法：不可测（原因见监视页读数下方）')
+            else:
+                self.label_method_prompt.setText('暂无测距数据')
+
         if len(self.sensor_history_conf) > 0 and self.sensor_history_conf[-1] < self.global_params.confidence_thres:
             self.label_conf.setText("置信度低于阈值！")
         else:
             self.label_conf.setText("置信度正常")
-    
-    
+
+    def _refresh_ttc_hint(self):
+        """TTC 分析图下方的告警提示（与监视页 TTC 同源：TTCResult → 分级）。"""
+        if not self.ttc_history:
+            self.label_prompt.setText('暂无TTC数据')
+            return
+        ttc = self.ttc_history[-1]
+        if ttc != ttc:      # NaN：本帧无 TTC（未接近/不可算/数据不足）
+            reason = self.ttc_reason_history[-1] if self.ttc_reason_history else ''
+            self.label_prompt.setText(
+                'TTC 告警：无' + (f'（{reason}）' if reason else ''))
+            return
+        cfg = self._ttc.cfg
+        level = classify_ttc(ttc, cfg)
+        if level == TTCLevel.CRITICAL:
+            text = f'TTC 告警：危险（TTC {ttc:.1f} s ≤ {cfg.ttc_critical} s）'
+        elif level == TTCLevel.WARNING:
+            text = f'TTC 告警：预警（TTC {ttc:.1f} s ≤ {cfg.ttc_warning} s）'
+        elif level == TTCLevel.CAUTION:
+            text = f'TTC 告警：提示（TTC {ttc:.1f} s ≤ {cfg.ttc_caution} s）'
+        else:
+            text = f'TTC 告警：无（TTC {ttc:.1f} s）'
+        self.label_prompt.setText(text)
+
     def update_resource_usage(self):
         if not self._analysis_plot_inited and self.global_params.plot_enable:
             return
@@ -453,6 +591,14 @@ class MainWindow(QWidget, Ui_Form):
         # 安装参数自标定（监视页）：由「已知距离 + 框底边像素」反解 (H, 俯仰角)
         self.btn_mark_known.clicked.connect(self.on_mark_known_clicked)
         self.btn_solve_mount.clicked.connect(self.on_solve_mount_clicked)
+        # 检测配置（设置页）：选择规则 / 指定类别即时生效（2026-09-26 修复：
+        # 之前这两个下拉只在"应用"按钮里才写 global_params，而且检测器侧
+        # 被 detection_conf 误用整个短路，界面形同虚设）
+        self.combo_target_select_rule.currentIndexChanged.connect(
+            self.on_select_rule_changed)
+        self.combo_specific_class.currentIndexChanged.connect(
+            self.on_specific_class_changed)
+
         # 摄像头设备（设置页）：像蓝牙那样按设备记标定
         self.combo_camera_device.currentIndexChanged.connect(
             self.on_camera_device_chosen)
@@ -1128,6 +1274,45 @@ class MainWindow(QWidget, Ui_Form):
         self.label_distance_value.setToolTip(self._ranging_tooltip(res))
         self.label_distance_reason.setText(self._ranging_reason_text(res))
 
+    def refresh_ttc_widgets(self, res: TTCResult):
+        """刷新碰撞预警读数行（值 + 分级着色）与原因小字。
+
+        显示规则（与离线分析同一套分级语义）：
+
+        - **可用**：``TTC x.x s（分级）``。参考级（近场宽度法距离 < 约 2 m）
+          额外加「？」，与距离读数的参考值标记同款 —— 不冒充精确值；
+        - **不可用**：值落回 ``--``，原因小字给出**为什么**（样本不足 /
+          未在接近 / 本帧离群 / 测距不可用…）。无目标时原因也清空 ——
+          「没有目标」是常态而非异常，每帧写一句只会刷屏。
+
+        分级着色只在**级别变化**时 setStyleSheet（防每帧重绘抖动）：
+        提示=琥珀、预警=深橙、危险=红；「无」恢复默认色。
+        """
+        if res.available:
+            txt = f'TTC {res.ttc:.1f} s（{res.level.value}）'
+            if res.is_reference:
+                txt += ' ？'
+            self.label_ttc_value.setText(txt)
+            self.label_ttc_reason.setText(
+                '参考级：近场宽度法距离算出的碰撞时间（±15% 起步），'
+                '仅供参考' if res.is_reference else '')
+        else:
+            self.label_ttc_value.setText('--')
+            self.label_ttc_reason.setText(
+                '' if '无目标' in res.reason else res.reason)
+        style = {
+            TTCLevel.CRITICAL: 'font-weight: bold; font-size: 12pt; '
+                               'color: #A32D2D;',
+            TTCLevel.WARNING: 'font-weight: bold; font-size: 12pt; '
+                              'color: #993C1D;',
+            TTCLevel.CAUTION: 'font-weight: bold; font-size: 12pt; '
+                              'color: #854F0B;',
+            TTCLevel.NONE: 'font-weight: bold; font-size: 12pt;',
+        }[res.level if res.available else TTCLevel.NONE]
+        if style != self._last_ttc_style:
+            self.label_ttc_value.setStyleSheet(style)
+            self._last_ttc_style = style
+
     def _ranging_reason_text(self, res=None) -> str:
         """距离读数下面那行小字：把「为什么」直接摆在界面上，而不是只藏在悬停里。
 
@@ -1320,6 +1505,7 @@ class MainWindow(QWidget, Ui_Form):
             session_dir = self.recorder.start(
                 (h, w, 3),
                 calibrated=self.global_params.calibrated,
+                distance_source='filtered',   # 数据轨 distance 存规范值（去噪后）
             )
         except Exception as e:
             self.recorder = None
@@ -1512,9 +1698,12 @@ class MainWindow(QWidget, Ui_Form):
             return
 
         self.play_index = self.replayer.position
-        self._display_frame(frame)
 
-        # 把数据轨记录还原成检测字典，复用实时链路的展示与绘图逻辑
+        # 把数据轨记录还原成检测字典，复用实时链路的展示与绘图逻辑。
+        # **先还原状态、再画帧**：画面上的框与距离标签必须就是这一帧的数据
+        # （原先先画后赋值，框和读数都比画面滞后一帧）。
+        # 距离取**规范值**（canonical_distance_at）：新格式录制里就是当时
+        # 屏幕上的那个数，旧格式现场补做同参数去噪 —— 与曲线、摘要同源。
         target = None
         if rec is not None and rec.has_target:
             target = {
@@ -1529,11 +1718,13 @@ class MainWindow(QWidget, Ui_Form):
             self.global_params.detection_height = rec.height
             self.global_params.detection_conf = rec.confidence
             self.global_params.target_category = rec.class_name or '未知'
-            # 回放时不重算距离，直接用录制时的值 —— 保证"看到的就是当时算的"
-            self.global_params.distance = rec.distance
+            self.global_params.distance = self.replayer.canonical_distance_at(
+                self.play_index - 1)
         else:
             self.last_detection = None
             self.global_params.distance = None
+
+        self._display_frame(frame)
 
         if not self._replay_seeking:
             total = self.replayer.total_frames
@@ -1550,7 +1741,11 @@ class MainWindow(QWidget, Ui_Form):
             self.lbl_original.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
         draw_img = frame_rgb.copy()
-        if self.last_detection and self.last_detection.get('confidence', 0) >= 0.3:
+        # 画框判据与目标过滤同源（2026-09-26：原先写死 >=0.3，置信度 0.65 的
+        # 误检在阈值调到 0.7 后照样画框 —— 滑块形同虚设的直接原因之一）。
+        # 回放路径的 last_detection 也走这里，行为一致：当前阈值就是显示过滤器。
+        if self.last_detection and self.last_detection.get('confidence', 0) \
+                >= self.global_params.confidence_thres:
             target = self.last_detection
             x, y = target['x'], target['y']
             w_box = target.get('width', 40)
@@ -1598,6 +1793,10 @@ class MainWindow(QWidget, Ui_Form):
     def show_replay_summary(self):
         """回放数据的统计摘要 + 测距曲线。
 
+        曲线画**规范距离**（去噪后），并按 TTC 分级分段着色：
+        一条曲线的哪几段是"提示/预警/危险"，颜色直接对应分级，
+        比看数字更容易读出一段录制里到底什么时候危险。
+
         曲线只画有值的点：距离为 None 的帧不画 0 ——
         0 米是"有效但错误"的读数，None 是"没有读数"，两者在图上必须可区分。
         """
@@ -1610,23 +1809,85 @@ class MainWindow(QWidget, Ui_Form):
         conf_txt = ('—' if s['confidence_mean'] is None
                     else f'{s["confidence_mean"]:.3f}')
         calib_txt = '已标定' if s['calibrated_at_record'] else '未标定（距离不可信）'
+        # 旧格式录制（数据轨存的是未去噪测量值）会在此注明曲线是补做去噪的 ——
+        # 不注明的话，人无法从界面上判断这条曲线和当时屏幕上的是不是同一个数。
+        src_txt = ('' if s.get('distance_source') == 'filtered'
+                   else ' · 曲线为回放时补做去噪（旧格式录制）')
         self.label_replay_summary.setText(
             f'会话 {s["session"]} · 时长 {s["duration_s"]:.1f}s · '
             f'视频 {s["frame_count"]} 帧 · 数据轨 {s["data_count"]} 条 · '
             f'丢帧 {s["dropped_frames"]}\n'
             f'有目标 {s["target_frames"]} 帧 · 可测距 {s["ranged_frames"]} 帧 · '
             f'距离范围 {dist_txt} · 平均置信度 {conf_txt} · 录制时{calib_txt}'
+            f'{src_txt}'
         )
 
-        ts, ds = self.replayer.distance_series()
-        if not hasattr(self, '_replay_curve'):
-            self.plot_replay_distance.addLegend()
-            self._replay_curve = self.plot_replay_distance.plot(
-                [], [], pen=pg.mkPen('g', width=2), name='几何测距')
-        self._replay_curve.setData(ts, ds)
+        ts, ds = self.replayer.canonical_distance_series()
+        levels = self._replay_ttc_levels()
+        self._draw_replay_segments(ts, ds, levels)
         self.plot_replay_distance.setLabel('bottom', '时间', units='s')
         self.plot_replay_distance.setLabel('left', '距离', units='m')
         self.plot_replay_distance.showGrid(x=True, y=True)
+
+    def _replay_ttc_levels(self):
+        """对回放会话逐帧算 TTC 分级，返回与 ``canonical_distance_series()``
+        的 ``ds`` 等长的分级列表。
+
+        喂给 ``TTCEstimator`` 的就是**同一条规范距离序列**（与实时链路同一个
+        类、同一套阈值），于是颜色回答的是"这段数据当时触发了哪一级告警"，
+        而不是另一套离线重算出来的结论。
+        """
+        est = TTCEstimator()
+        levels = []
+        for rec, d in zip(self.replayer.records,
+                          self.replayer.canonical_distances()):
+            res = est.update(
+                t=rec.t,
+                box=(rec.x, rec.y, rec.width, rec.height),
+                class_id=rec.class_id,
+                has_target=rec.has_target,
+                distance=d,
+            )
+            if d is not None:          # 只保留曲线上的点，与 ds 对齐
+                levels.append(res.level)
+        return levels
+
+    def _draw_replay_segments(self, ts, ds, levels):
+        """把回放曲线按 TTC 分级切成若干段，每段一种颜色。
+
+        pyqtgraph 的一条曲线只有一个画笔，要在一根线上换色只能**分段画**。
+        相邻段之间复用边界点（后一段起点接前一段终点），否则线会在换色处
+        断开，看起来像丢帧。
+        """
+        plot = self.plot_replay_distance
+        if not getattr(self, '_replay_legend_done', False):
+            plot.addLegend()
+            self._replay_legend_done = True
+        for item in getattr(self, '_replay_seg_items', []):
+            plot.removeItem(item)
+        self._replay_seg_items = []
+        if not ts:
+            return
+
+        cfg = self._ttc.cfg
+        segs = []
+        start = 0
+        for i in range(1, len(ts) + 1):
+            if i == len(ts) or levels[i] != levels[start]:
+                segs.append((start, i - 1, levels[start]))
+                start = i
+        named = set()
+        for a, b, lv in segs:
+            # 段尾多带一个点（下一段的起点），保证换色处不断线
+            end = min(b + 1, len(ts) - 1)
+            xs, ys = ts[a:end + 1], ds[a:end + 1]
+            name = None
+            if lv not in named:        # 每级只在图例里出现一次
+                named.add(lv)
+                name = _ttc_level_legend_name(lv, cfg)
+            item = plot.plot(xs, ys, pen=pg.mkPen(_TTC_LEVEL_COLORS[lv],
+                                                  width=2), name=name)
+            self._replay_seg_items.append(item)
 
     def update_param_realtime(self,param_name,value,label,fmt):
         setattr(self.global_params,param_name,value)
@@ -1797,28 +2058,44 @@ class MainWindow(QWidget, Ui_Form):
                 self.status_bar.showMessage(f'加载标签失败：{str(e)}', 5000)
             self.update_specific_class_combo()
                 
+    def on_select_rule_changed(self, index):
+        """选择规则下拉即时写入（0=最高置信度，1=指定类别）。"""
+        self.global_params.target_select_rule = index
+
+    def on_specific_class_changed(self, index):
+        """指定类别下拉即时写入。下拉按标签文件顺序填充，index 即 class_id。"""
+        self.global_params.specific_class_id = index
+        self.global_params.specific_class = self.combo_specific_class.currentText()
+
     def update_specific_class_combo(self):
-        self.combo_specific_class.clear()#清空下拉框，确保状态统一
-        if hasattr(self, 'labels') and self.labels and len(self.labels)>0:
-            self.combo_specific_class.addItems(self.labels)
-            class_id=self.global_params.specific_class_id
-            if class_id is not None and 0 <= class_id < len(self.labels):
-                self.combo_specific_class.setCurrentIndex(class_id)
+        # 重填期间屏蔽信号：clear/addItems 会触发 currentIndexChanged，
+        # 产生 specific_class_id=-1/0 的瞬态误写；参数由本函数末尾统一落定
+        self.combo_specific_class.blockSignals(True)
+        try:
+            self.combo_specific_class.clear()#清空下拉框，确保状态统一
+            if hasattr(self, 'labels') and self.labels and len(self.labels)>0:
+                self.combo_specific_class.addItems(self.labels)
+                class_id=self.global_params.specific_class_id
+                if class_id is not None and 0 <= class_id < len(self.labels):
+                    self.combo_specific_class.setCurrentIndex(class_id)
+                else:
+                    self.global_params.specific_class_id=0
+                    self.combo_specific_class.setCurrentIndex(0)
+                    self.global_params.specific_class=self.labels[0]
             else:
-                self.global_params.specific_class_id=0
-                self.combo_specific_class.setCurrentIndex(0)
-                self.global_params.specific_class=self.labels[0]
-        else:
-            self.combo_specific_class.addItem('无标签')
-            self.global_params.specific_class_id=-1
-            self.global_params.specific_class='无标签'
+                self.combo_specific_class.addItem('无标签')
+                self.global_params.specific_class_id=-1
+                self.global_params.specific_class='无标签'
+        finally:
+            self.combo_specific_class.blockSignals(False)
 
             
     def on_detection_ready(self,target):#检测结果回调
 
-        self.last_detection=target
-
         if target and target['confidence']>=self.global_params.confidence_thres:# 增加置信度过滤，低于阈值视为无目标
+            self.last_detection = target   # 过滤后的目标才进画面叠加（2026-09-26：
+                                            # 之前无条件记录，低于阈值的椅子误检照样画框，
+                                            # 用户调阈值「看起来没用」的直接原因之一）
             self.global_params.detection_x = target['x']
             self.global_params.detection_y = target['y']
             self.global_params.detection_width = target.get('width', 0)
@@ -1837,6 +2114,7 @@ class MainWindow(QWidget, Ui_Form):
             self.lcd_credibility.display(self.global_params.detection_conf)
             self.label_target_category.setText(self.global_params.target_category)
         else:
+            self.last_detection = None    # 与上方配对：低于阈值 = 无目标，别留旧框
             self.global_params.detection_x = 320  # 重置为画面中心
             self.global_params.detection_y = 240
             self.global_params.detection_width = 0
@@ -1861,18 +2139,44 @@ class MainWindow(QWidget, Ui_Form):
                 self.global_params.target_category,
             )
         dist = res.distance if res is not None else None
+        now_mono = time.monotonic()
+
+        # ---- 距离去噪：紧跟测距，输出即"规范距离"（2026-09-26）---------------
+        # 中值3 + One Euro 串联（core/ranging_filter.py，参数经 104005 会话重放
+        # 扫参选定）。**位置很关键**：放在测距之后、其余一切之前，于是整条链路
+        # 自始至终只有一个距离值 —— 速度门控、人特征档案、监视页读数、TTC、
+        # 深度分析曲线、录制轨存的全都是它。
+        #
+        # 为什么不放在门控之后（原先的位置）：门控会把单帧尖刺判成"跳变错值"，
+        # 被拦的帧 dist=None → 滤波器复位 → 平滑历史被一个假值清空。先滤波则
+        # 中值窗先吃掉孤立尖刺，门控只在**持续**的跳变上触发（真正该拦的情形），
+        # 复位也随之只发生在目标真的换人时。
+        #
+        # 原始值只留一份给录制轨做诊断（distance_raw），实时逻辑一律不读。
+        raw_dist = dist
+        if dist is not None:
+            dist = self._dist_filter.update(now_mono, dist)
+            if res is not None and res.distance is not None:
+                res.distance = dist   # 显示与判定同源：读数/悬停/原因行一起用规范值
+        else:
+            self._dist_filter.reset()
 
         # ---- 速度门控 + 人特征档案（2026-09-25 P1+）------------------------
         # 门控在人身上：人不可能瞬移，1.5→10 m 的跳变只可能是检测跳变/抓错框，
         # 拦下并给出原因（拦的是错值，不是拦人）。非 person 目标（车等）相对
         # 速度可以更高，不套人的极限。
-        now_mono = time.monotonic()
-        is_person = self.global_params.target_category == 'person'
+        # 归一化后再比（标签文件可能是中文 coco_labels_cn.txt，「人」≠'person'，
+        # 不归一化会让速度门控与人特征档案整体静默失效 —— 2026-09-25 22:14 录制实证）
+        is_person = (canonical_class_name(self.global_params.target_category)
+                     == 'person')
         if dist is not None and is_person:
             verdict = self._speed_gate.check(dist, now_mono)
             if not verdict.ok:
                 res = RangingResult(reason=verdict.reason)
                 dist = None
+                # 门控判"这不是同一个目标"→ 滤波器里那段历史同样不可信，一起复位
+                # （否则被否定的读数仍在平滑状态里，会拖歪后续帧）。
+                self._dist_filter.reset()
             elif verdict.reason:
                 # 重新锚定（丢失超时 / 连续一致的新轨迹）：读数保留，说明进状态栏
                 self.status_bar.showMessage(verdict.reason, 4000)
@@ -1913,7 +2217,30 @@ class MainWindow(QWidget, Ui_Form):
                 self.status_bar.showMessage(
                     f'人员特征已建档：身高 {p.height_m:.2f} m、肩宽 '
                     f'{p.width_m:.2f} m —— 近场宽度法改用该肩宽', 6000)
+        # 到这里 dist 已是全链路唯一的规范距离（去噪在测距之后立即完成，
+        # 见上方「距离去噪」段）：门控/人档案/读数/TTC/曲线/录制都用它。
         self.global_params.distance = dist
+
+        # ---- TTC 碰撞预警（2026-09-25 实时接入）---------------------------
+        # 喂门控后的距离（被速度门控拦截的帧 dist=None → 按测距不可用处理）。
+        # has_target 的口径与测距一致：过置信度阈值且框高 > 0。
+        # 时基用 monotonic（回调节奏 = 检测帧率），与离线用的录制相对时间
+        # 同构 —— TTCEstimator 只关心差值。
+        ttc_res = self._ttc.update(
+            t=now_mono,
+            box=(self.global_params.detection_x,
+                 self.global_params.detection_y,
+                 self.global_params.detection_width,
+                 self.global_params.detection_height),
+            class_id=self.global_params.detection_class,
+            has_target=bool(self.global_params.detection_height > 0
+                            and target is not None
+                            and isinstance(target, dict)
+                            and target.get('confidence', 0.0)
+                            >= self.global_params.confidence_thres),
+            distance=dist,
+        )
+        self.refresh_ttc_widgets(ttc_res)
 
         # 实时距离读数（监视页「目标位置」分组，CHARTER 门槛判据）
         # display() 在存疑时给 "5.00 m？"、不可测时给 "不可测"，都不隐藏数据
@@ -1936,18 +2263,26 @@ class MainWindow(QWidget, Ui_Form):
             # 距离为 None 时曲线落 0（pyqtgraph 不画 None），但状态栏与录制
             # 里的值保持 None —— 绝不把"没有读数"伪装成"读到 0 米"
             distance = dist if dist is not None else 0.0
-            self.sensor_history_x.append(self.global_params.detection_x)
-            self.sensor_history_y.append(self.global_params.detection_y)
-            self.sensor_history_wide.append(self.global_params.detection_width)
-            self.sensor_history_hight.append(self.global_params.detection_height)
             self.sensor_history_conf.append(self.global_params.detection_conf)
             self.sensor_history_fps.append(self.global_params.inference_fps)
             self.target_distance.append(distance)
+            # 类别轨迹（距离曲线按类别着色）+ 方法轨迹（只喂下方提示行）
+            self.class_history.append(self.global_params.target_category or '未知')
+            self.method_history.append(
+                '不可测' if dist is None or res is None
+                else (res.method or '几何测距'))
+            # TTC 轨迹：不可算的帧记 NaN（pyqtgraph 画成断线，不冒充 0 秒）
+            self.ttc_history.append(
+                ttc_res.ttc if ttc_res.available else float('nan'))
+            self.ttc_reason_history.append(
+                '' if ttc_res.available else (ttc_res.reason or '目标未在接近'))
             self.time_history.append(self.time_counter)
             self.sensor_history_conf_thres.append(self.global_params.confidence_thres)
             self.time_counter += 1.0 / self.global_params.sample_freq
 
-        # 录制：数据轨与视频轨分开存，此处只追加一条记录（非阻塞）
+        # 录制：数据轨与视频轨分开存，此处只追加一条记录（非阻塞）。
+        # distance 存**规范值**（去噪后、与当时屏幕/判定同源的那个数），
+        # distance_raw 只作诊断（事后重调滤波器参数用，实时逻辑不读）。
         if self.recorder is not None:
             self._rec_seq += 1
             self.recorder.push_record(FrameRecord.from_detection(
@@ -1956,6 +2291,7 @@ class MainWindow(QWidget, Ui_Form):
                 target=target if isinstance(target, dict) else None,
                 class_name=self.global_params.target_category,
                 distance=dist,
+                distance_raw=raw_dist,
                 inference_fps=self.global_params.inference_fps,
             ))
             

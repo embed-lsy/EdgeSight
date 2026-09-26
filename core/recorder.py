@@ -80,6 +80,13 @@ class RecordingMeta:
     dropped_frames: int = 0           # 队列溢出丢弃数
     duration_s: float = 0.0
     calibrated_at_record: bool = False  # 录制时是否已标定（决定测距值是否可信）
+    distance_source: str = 'raw'      # 数据轨 distance 字段的含义：
+                                      #   'filtered' = 规范值（去噪后，与实时显示/
+                                      #                TTC 同一个值）
+                                      #   'raw'      = 未去噪的测量值（旧格式，
+                                      #                2026-09-26 之前的录制）
+                                      # Replayer.canonical_distances() 据此决定
+                                      # 是直接用还是现场补做去噪。
     note: str = ''
 
     def to_json(self) -> str:
@@ -92,6 +99,16 @@ class FrameRecord:
 
     字段对齐 ``YOLODetector.detection_ready`` 的字典结构，
     这样回放时可以直接把这条记录喂回既有的展示逻辑，不需要另写一套解析。
+
+    关于 ``distance`` 与 ``distance_raw``（2026-09-26 明确）
+    --------------------------------------------------------
+    全链路里距离**只有一个规范值**：实时链路里那个去噪后驱动读数、TTC、
+    判定与绘图的距离。``distance`` 存的就是它 —— 回放/离线分析读出去，
+    看到的与当时屏幕上看到的、当时参与判断的是同一个数。
+
+    ``distance_raw`` 是**原始测量值**，只作诊断用（事后重新调滤波器参数
+    时才知道滤波前长什么样）。**任何实时逻辑都不许读它** —— 一旦有人
+    读，就变成"UI 看去噪、实际用原始"的两套数，那是要避免的错误形态。
     """
 
     seq: int = 0                      # 帧序号（从 0 开始）
@@ -105,13 +122,15 @@ class FrameRecord:
     confidence: float = 0.0
     class_id: int = -1
     class_name: str = ''
-    distance: Optional[float] = None  # 几何测距结果（米），None = 不可解算
+    distance: Optional[float] = None  # 规范距离（米），None = 不可解算
+    distance_raw: Optional[float] = None  # 诊断用原始测量值，实时逻辑禁读
     inference_fps: float = 0.0
 
     @classmethod
     def from_detection(cls, seq: int, t: float, target: Optional[dict],
                        class_name: str, distance: Optional[float],
-                       inference_fps: float) -> 'FrameRecord':
+                       inference_fps: float,
+                       distance_raw: Optional[float] = None) -> 'FrameRecord':
         rec = cls(seq=seq, t=t, wall_t=time.time(),
                   inference_fps=float(inference_fps or 0.0))
         if target:
@@ -124,6 +143,8 @@ class FrameRecord:
             rec.class_id = int(target.get('class_id', -1))
             rec.class_name = class_name or ''
             rec.distance = None if distance is None else float(distance)
+            rec.distance_raw = (None if distance_raw is None
+                                else float(distance_raw))
         return rec
 
 
@@ -191,8 +212,14 @@ class Recorder:
         return len(self._records)
 
     def start(self, frame_shape, calibrated: bool = False,
-              session: Optional[str] = None) -> str:
-        """开始录制。``frame_shape`` 是 (h, w, c)，用于初始化 VideoWriter。"""
+              session: Optional[str] = None,
+              distance_source: str = 'raw') -> str:
+        """开始录制。``frame_shape`` 是 (h, w, c)，用于初始化 VideoWriter。
+
+        ``distance_source`` 声明数据轨 ``distance`` 字段存的是什么
+        （见 ``RecordingMeta.distance_source``）。主链路传 ``'filtered'``：
+        存规范值，回放与离线分析读到的就是当时屏幕上的那个数。
+        """
         if self._running:
             raise RuntimeError('已在录制中')
 
@@ -215,6 +242,7 @@ class Recorder:
             width=w, height=h,
             fps_nominal=self.fps,
             calibrated_at_record=calibrated,
+            distance_source=distance_source,
         )
 
         self._queue = queue.Queue(maxsize=self.queue_size)
@@ -324,6 +352,7 @@ class Replayer:
         self.records: List[FrameRecord] = self._load_records()
         self._cap: Optional[cv2.VideoCapture] = None
         self._index = 0
+        self._canon: Optional[List[Optional[float]]] = None   # 规范距离缓存
 
     # -- 加载 ---------------------------------------------------------------
 
@@ -424,22 +453,76 @@ class Replayer:
 
     # -- 分析辅助 -----------------------------------------------------------
 
-    def distance_series(self):
-        """返回 (时间序列, 距离序列)，跳过不可解算的帧。
+    def canonical_distances(self) -> List[Optional[float]]:
+        """与 ``self.records`` 逐条对齐的**规范距离**，不可解算处为 None。
 
-        只回传有值的点：测距不可用时不应在曲线上画 0 ——
-        0 米是一个"有效的错误读数"，而 None 是"没有读数"，两者不能混。
+        规范距离 = 实时链路里那个去噪后驱动读数 / TTC / 判定的值。
+        数据轨的 ``distance`` 存的就是它（``meta.distance_source ==
+        'filtered'``），直接取用即可。
+
+        旧格式（``distance_source == 'raw'``，2026-09-26 之前的录制）存的
+        是**未去噪的测量值**，这里用与实时链路同一个类、同一组参数**现场
+        补做一次去噪**，让老录制的曲线与统计口径和新录制一致 —— 否则
+        "回放看去噪、离线分析用原始"又会变成两套数。
+
+        统计/曲线/离线分析一律走本方法，不要各自去读裸字段。
+        """
+        if self._canon is not None:
+            return self._canon
+
+        if self.meta.distance_source == 'filtered':
+            self._canon = [r.distance for r in self.records]
+            return self._canon
+
+        from core.ranging_filter import DistanceFilter  # 仅旧格式需要，延迟导入
+        flt = DistanceFilter()
+        out: List[Optional[float]] = []
+        prev_t: Optional[float] = None
+        for r in self.records:
+            if r.distance is None:
+                flt.reset()          # 「没有读数」不能被平滑成「有个读数」
+                prev_t = None
+                out.append(None)
+                continue
+            if prev_t is not None and r.t - prev_t > 1.0:
+                flt.reset()          # 数据断档超 1s：旧状态对新段没有意义
+            out.append(flt.update(r.t, r.distance))
+            prev_t = r.t
+        self._canon = out
+        return out
+
+    def canonical_distance_at(self, index: int) -> Optional[float]:
+        """第 ``index`` 条记录的规范距离（越界返回 None）。
+
+        回放画面上那行「目标 0.85 2.31m」必须用这个值而不是裸字段 ——
+        否则旧格式录制的标签显示原始值、曲线显示去噪值，同一屏两套数。
+        """
+        canon = self.canonical_distances()
+        if 0 <= index < len(canon):
+            return canon[index]
+        return None
+
+    def canonical_distance_series(self):
+        """``(时间序列, 规范距离序列)``，只含**有读数**的帧。
+
+        不可解算的帧不进曲线：0 米是"有效但错误的读数"，None 是
+        "没有读数"，两者在图上必须可区分。
         """
         ts, ds = [], []
-        for r in self.records:
-            if r.distance is not None:
+        for r, d in zip(self.records, self.canonical_distances()):
+            if d is not None:
                 ts.append(r.t)
-                ds.append(r.distance)
+                ds.append(d)
         return ts, ds
 
     def summary(self) -> Dict[str, Any]:
-        """回放数据的统计摘要，用于事后分析面板。"""
-        with_dist = [r for r in self.records if r.distance is not None]
+        """回放数据的统计摘要，用于事后分析面板。
+
+        距离类统计一律基于**规范距离**（``canonical_distances``），与曲线
+        同源 —— 否则会出现"曲线是去噪的、范围却是原始的"这种对不上的摘要。
+        """
+        canon = self.canonical_distances()
+        with_dist = [d for d in canon if d is not None]
         confs = [r.confidence for r in self.records if r.has_target]
         return {
             'session': self.meta.session,
@@ -448,9 +531,10 @@ class Replayer:
             'data_count': len(self.records),
             'dropped_frames': self.meta.dropped_frames,
             'calibrated_at_record': self.meta.calibrated_at_record,
+            'distance_source': self.meta.distance_source,
             'target_frames': sum(1 for r in self.records if r.has_target),
             'ranged_frames': len(with_dist),
-            'distance_min': min((r.distance for r in with_dist), default=None),
-            'distance_max': max((r.distance for r in with_dist), default=None),
+            'distance_min': min(with_dist, default=None),
+            'distance_max': max(with_dist, default=None),
             'confidence_mean': (sum(confs) / len(confs)) if confs else None,
         }
