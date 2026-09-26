@@ -254,6 +254,10 @@ class MainWindow(QWidget, Ui_Form):
         self._replay_ts = []          # 回放会话的**全量**曲线数据（加载时算一次）
         self._replay_ds = []
         self._replay_levels = []
+        # 懒绘制（2026-09-26 用户要求：回放只加载当前页面的曲线，监视页
+        # 不刷深度分析曲线，减少 UI 负担）。画面与回放曲线只在**对应页
+        # 可见**时绘制；后台页只维护数据状态，切回该页时一次性补齐。
+        self._last_display_bgr = None  # 最近一帧画面（BGR，供切回监控页补画）
         # 初始化状态栏
         self.status_bar=QStatusBar(self)
         self.layout().addWidget(self.status_bar)
@@ -1840,7 +1844,16 @@ class MainWindow(QWidget, Ui_Form):
                 self.slider_play_pos.setValue(int(self.play_index / total * 1000))
 
     def _display_frame(self, frame_bgr):
-        """把一帧 BGR 画到界面上（实时与回放共用）。"""
+        """把一帧 BGR 画到界面上（实时与回放共用）。
+
+        懒绘制（2026-09-26 用户要求）：画面控件在监控页，不在监控页时
+        只保存帧引用、跳过 cvtColor/copy/两次 setPixmap（SmoothTransformation
+        缩放是 UI 大头），切回监控页时由 on_tab_change 用最近一帧补画。
+        检测/测距/录制等数据链路不经过这里，后台照常运转。
+        """
+        self._last_display_bgr = frame_bgr
+        if self.tabWidget.currentIndex() != 0:
+            return
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         h, w, ch = frame_rgb.shape
         qt_img = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
@@ -2027,18 +2040,24 @@ class MainWindow(QWidget, Ui_Form):
         prev = self._curve_pts[-1] if self._curve_pts else None
         turning = prev is not None and prev[2] != level
         self._curve_pts.append((t, d, level))
+        # 懒绘制：回放页不可见时只维护状态、不碰图（setData 会触发
+        # pyqtgraph 的数据拷贝与重绘准备，后台白白消耗主线程）；
+        # 切回回放页时 _repaint_replay_curve 一次性补齐。
+        paint = self._replay_tab_visible()
         if turning:
             pxs, pys = self._curve_xy[prev[2]]      # prev 一定 push 过
             pxs.append(t)
             pys.append(float('nan'))
-            self._curve_item(prev[2]).setData(pxs, pys)
+            if paint:
+                self._curve_item(prev[2]).setData(pxs, pys)
         xs, ys = self._curve_xy.setdefault(level, ([], []))
         if turning:
             xs.append(prev[0])
             ys.append(prev[1])
         xs.append(t)
         ys.append(d)
-        self._curve_item(level).setData(xs, ys)
+        if paint:
+            self._curve_item(level).setData(xs, ys)
 
 
     def _curve_rebuild(self, points):
@@ -2086,12 +2105,36 @@ class MainWindow(QWidget, Ui_Form):
 
      
     #界面交互
+    def _replay_tab_visible(self):
+        """回放页（tab 3）当前是否可见 —— 懒绘制开关。"""
+        return self.tabWidget.currentIndex() == 3
+
+    def _repaint_replay_curve(self):
+        """切回回放页时把曲线数据一次性刷到图上（懒绘制补齐）。
+
+        后台期间 ``_curve_push`` 只维护 ``_curve_xy`` 状态、不碰图；
+        这里全量 setData 一次，数据本来就是现成的。
+        """
+        if not self._curve_xy:
+            # 没有数据也要清掉图上残留（换会话后切页的场景）
+            for item in self._curve_items.values():
+                item.setData([], [])
+            return
+        for level, (xs, ys) in self._curve_xy.items():
+            self._curve_item(level).setData(xs, ys)
+
     @Slot(int)
     def on_tab_change(self,index):
         tab_name=['监控','深度分析','设置','录制回放']
         currebt_tab=tab_name[index]
         print(f"当前选项卡：{currebt_tab}")
-        if currebt_tab=='深度分析':
+        if currebt_tab=='监控':
+            # 懒绘制补齐：后台期间画面没画，切回来用最近一帧补上
+            # （last_detection / global_params 的状态一直在更新，补画的
+            #  框与读数就是最新状态，不是过期画面）
+            if self._last_display_bgr is not None:
+                self._display_frame(self._last_display_bgr)
+        elif currebt_tab=='深度分析':
             self.init_analysis_plots()
             if not self.analysis_timer.isActive():
                 self.analysis_timer.start()
@@ -2110,6 +2153,8 @@ class MainWindow(QWidget, Ui_Form):
             self.refresh_calib_widgets()
             self.refresh_camera_widgets()
         elif currebt_tab=='录制回放':
+            # 懒绘制补齐：后台期间曲线只记数据没画图，切回来全量刷一次
+            self._repaint_replay_curve()
             if self.replayer is not None:
                 self.show_replay_summary()
                 

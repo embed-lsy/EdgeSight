@@ -744,6 +744,24 @@ EdgeSight/
     旧实现同样如此，边界语义以实测为准）；② `Signal(dict)` 被
     `emit(None)` 触发时槽收到的是**空字典**而非 None（Shiboken 按默认值
     转换）—— 测试若按 `is None` 判无目标会误报。
+16. **Signal(object) 修正 + 页面级懒绘制**（09-26，UI 提速）：
+    ① 两处 `Signal(dict)` → `Signal(object)`（yolo/ncnn 检测器）——
+    dict 信号在 `emit(None)` 时槽收到的是被签名转换的**空字典**，接收方
+    无法区分「无目标」与「空检测」；object 原样传递，emit(dict) 行为
+    不变（dict 本就是 object 子类型）。② 懒绘制（用户要求「回放只加载
+    当前页面的曲线，监视页不刷深度分析曲线」）：画面（`_display_frame`）
+    只在监控页可见时绘制（非监控页跳过 cvtColor/copy/两次
+    SmoothTransformation 缩放，帧引用保留、切回时补画一帧）；回放曲线
+    （`_curve_push`）只在回放页可见时 setData（后台只维护数据状态，切回
+    时 `_repaint_replay_curve` 全量补齐一次）。检测/测距/录制等数据链路
+    **不经过**这两个函数，后台照常运转，录制的数据一个不丢。实测
+    （`bench_lazy_paint.py`，真实会话两遍换序）：回放页可见 12.9 ms/tick
+    vs 监控页懒绘制 10.7 ms/tick，单帧省约 2 ms 且曲线 setData 是 O(n)
+    全量操作、会话越长收益越大；此前「非深度分析页停 analysis_timer」
+    的修复（37.2 vs 42.3 ms）仍在。验证 `verify_lazy_paint.py` 20/0
+    （含端到端：监控页后台播 20 帧 → 切回回放页图上点数与状态一致），
+    回归 replay_curve_sync 39/0（测试补了「图上断言须在回放页驱动」的
+    前提）、tab_change_timer、replay_alignment 25/0。
 
 **后续**：外参偏航角、几何 × 深度的双源互检（含 DA-V2 米制版异步旁路）、
 卷尺 5 m / 10 m 两点验收；第 2 期回归树莓派（NCNN 部署 + 边缘帧率实测）。

@@ -63,7 +63,11 @@ class ModelInitThread(QThread):
 
 
 class YOLODetector(QObject):
-    detection_ready = Signal(dict)
+    # Signal(object) 而非 Signal(dict)（2026-09-26）：dict 信号在 emit(None)
+    # 时槽收到的是「空字典 {}」（Shiboken 按签名默认构造），接收方无法区分
+    # 「无目标」和「空检测」。object 原样传递，None 就是 None；
+    # emit(dict) 的行为不变（dict 本就是 object 的子类型）。
+    detection_ready = Signal(object)
 
     def __init__(self, model_path, label_path, global_params, conf_thres=0.5, nms_thres=0.45, hardware_accel='CPU',model_type='v8'):
         super().__init__()

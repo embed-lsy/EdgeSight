@@ -7,7 +7,9 @@ from PySide6.QtCore import QObject, Slot, Signal
 from .postprocess import postprocess_yolov8_ncnn, postprocess_yolov5_ncnn  # 导入后处理函数
 
 class NCNNDetector(QObject):
-    detection_ready = Signal(dict)
+    # 与 YOLODetector 同口径（2026-09-26）：Signal(object) 让 emit(None)
+    # 传到槽的就是 None，而不是被签名转换成的空字典。
+    detection_ready = Signal(object)
 
     def __init__(self, param_path, bin_path, label_path, global_params, conf_thres=0.5, nms_thres=0.45,model_type='v5'):
         super().__init__()
