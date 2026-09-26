@@ -5,6 +5,7 @@ import numpy as np
 import onnxruntime as ort
 from PySide6.QtCore import QObject, Slot, Signal,QThread
 from .postprocess import postprocess_yolov8,postprocess_yolov5  # 导入后处理函数
+from core.calibration import canonical_class_name
 
 
 class ModelInitThread(QThread):
@@ -75,6 +76,25 @@ class YOLODetector(QObject):
         self.labels = []
         self.global_params = global_params
         self.model_type=model_type
+        # CHARTER v1.3：全链路唯一类别是「行人」。标签文件载入后由
+        # _refresh_person_class_ids() 算出 person 的 class_id 白名单；
+        # None = 标签不可用（无法确定哪个 id 是 person，此时不过滤并
+        # 在 _refresh 里说明，不瞎猜 COCO id 0）。
+        self._person_class_ids = None
+
+    def _refresh_person_class_ids(self):
+        """从当前标签文件算出 person 的 class_id 集合（CHARTER v1.3）。
+
+        中英文标签都过 ``canonical_class_name`` 归一化（coco80.txt 的
+        ``person`` 与 coco_labels_cn.txt 的 ``人`` 都命中）。
+        标签为空 → 白名单置 None（后处理不过滤）。这是**如实降级**：
+        没有标签就无从知道哪个 id 是行人，宁可不过滤也不猜
+        「id 0 就是 person」—— 换标签文件的自由是用户的。
+        """
+        ids = frozenset(
+            i for i, name in enumerate(self.labels)
+            if canonical_class_name(name) == 'person')
+        self._person_class_ids = ids if ids else None
 
     def load_model(self, preloaded_model=None):
         """加载模型。
@@ -92,6 +112,7 @@ class YOLODetector(QObject):
                 if not self.labels and os.path.isfile(self.label_path):
                     with open(self.label_path, 'r', encoding='utf-8') as f:
                         self.labels = [line.strip() for line in f if line.strip()]
+                self._refresh_person_class_ids()
                 return True
 
             import onnxruntime as ort
@@ -103,6 +124,7 @@ class YOLODetector(QObject):
             if os.path.isfile(self.label_path):
                 with open(self.label_path, 'r', encoding='utf-8') as f:
                     self.labels = [line.strip() for line in f]
+            self._refresh_person_class_ids()
             return True
         except Exception as e:
             print(f'模型加载失败：{str(e)}')
@@ -138,11 +160,14 @@ class YOLODetector(QObject):
         conf_thres = getattr(self.global_params, 'confidence_thres',
                              self.conf_thres)
         nms_thres = getattr(self.global_params, 'nms_thres', self.nms_thres)
-        # 调用后处理函数
+        # 调用后处理函数。v8 传 person 白名单（CHARTER v1.3 唯一类别；
+        # 非行人框在 NMS 之前就被滤掉）。v5 路径本期不改（主链路是 v8）。
         if self.model_type == 'v5':
             detections = postprocess_yolov5(outputs, (w, h), scale, dw, dh, conf_thres, nms_thres)
         elif self.model_type == 'v8':
-            detections = postprocess_yolov8(outputs, (w, h), scale, dw, dh, conf_thres, nms_thres)
+            detections = postprocess_yolov8(outputs, (w, h), scale, dw, dh,
+                                            conf_thres, nms_thres,
+                                            keep_class_ids=self._person_class_ids)
         target = self.select_target(detections, (w, h))
         inference_time = time.time() - start_time
         self.global_params.inference_fps = 1.0/inference_time if inference_time > 0 else 0.0

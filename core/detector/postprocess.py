@@ -1,68 +1,81 @@
 import numpy as np
 import cv2
 
-def postprocess_yolov8(outputs, original_shape, scale, dw, dh,conf_thres, nms_thres):
-    #将模型原始输出转化为检测结果列表,YOLOV8
-        detections=[]
-        orig_w, orig_h = original_shape
-        #后处理逻辑
-        if isinstance(outputs, (list, tuple)):#判断outputs是否是列表/元组
-            # 每个输出 shape 为 (1, 84, ?) ，1是batch维度，通常处理1张图；84=4（坐标）+80（类别标签）；？是预测框的总数
-            preds = []
-            for out in outputs:
-                pred = out[0]  # 取第一个 batch
-                preds.append(pred)
-            pred = np.concatenate(preds, axis=1)   # 拼接所有分支输出
-        else:
-            pred = outputs[0] if outputs.ndim == 3 else outputs
+def postprocess_yolov8(outputs, original_shape, scale, dw, dh, conf_thres, nms_thres,
+                       keep_class_ids=None):
+    """YOLOv8 后处理（2026-09-26 向量化重写，CHARTER v1.3 硬约束）。
 
-        # 转置为 (预测数, 84)
-        pred = pred.transpose(1, 0)   
-        #过滤低信任度
-        for det in pred:
-            cx_norm, cy_norm, w_norm, h_norm = det[:4]# 检测框位置
-            score=det[4:]# 类别概率
-            class_id=np.argmax(score)# 返回最大概率值
-            conf=score[class_id]# 取对应值的可信度
-            if conf<conf_thres:
-                continue
-            #反归一化到像素坐标，V5需要反归一化，V8不用，需要的时候要*640
-            cx_canvas = cx_norm 
-            cy_canvas = cy_norm 
-            w_canvas = w_norm 
-            h_canvas = h_norm 
-            # 从画布坐标映射回原始图像坐标，减去偏移，除以缩放比例
-            cx_orig = (cx_canvas - dw) / scale
-            cy_orig = (cy_canvas - dh) / scale
-            w_orig = w_canvas / scale
-            h_orig = h_canvas / scale
-            # 边界裁剪（确保不超出图像范围）
-            cx_orig = np.clip(cx_orig, 0, orig_w)
-            cy_orig = np.clip(cy_orig, 0, orig_h)
-            w_orig = min(w_orig, orig_w)
-            h_orig = min(h_orig, orig_h)
-            detections.append({
-                'x':int(cx_orig),
-                'y':int(cy_orig),
-                'width':int(w_orig),
-                'height':int(h_orig),
-                'confidence':float(conf),
-                'class_id':int(class_id)
-            })
-        # 应用 NMS（非极大抑制）
-        if detections:
-            boxes = np.array([[d['x'] - d['width']/2, d['y'] - d['height']/2,d['width'], d['height']] for d in detections])
-            confs = np.array([d['confidence'] for d in detections])
-            indices = cv2.dnn.NMSBoxes(boxes.tolist(), confs.tolist(),conf_thres, nms_thres)
-            if len(indices) > 0:
-                indices = indices.flatten()
-                detections = [detections[i] for i in indices]
-            else:
-                detections = []
-        
-            print(f"[Detector] NMS indices: {indices}")
+    旧实现逐框 Python 循环 8400 个预测、每框 ``np.argmax(80 元素)`` ——
+    实测占整帧 **43%**（33 ms/帧，`probe_detector_stage_cost.py`，
+    两遍换顺序复测一致）。本版全程 numpy 向量化，同一输入的输出与旧实现
+    **逐字节一致**（`verify_postprocess_vec.py` 用 git HEAD 旧版对拍）。
 
-        return detections
+    ``keep_class_ids``：可选的类别白名单（CHARTER v1.3「目标类别只有
+    行人」—— 传 person 的 class_id 集合）。语义是 **argmax 判定**：
+    预测框的 argmax 类别不在白名单里就整个丢弃（在进 NMS **之前**，
+    少喂 NMS 也是提速的一部分）—— **不会**把「argmax=car 0.86 而
+    person=0.42」的框重标成 person 0.42（那等于把车框伪造成行人）。
+    ``None`` = 不过滤。
+
+    与旧实现刻意保持一致的细节（对拍的要求，别"顺手优化"掉）：
+    - 坐标做 ``int()`` 截断（向零取整）后才用于 NMS 框计算；
+    - NMS 输入格式 ``(left, top, w, h)``、score_threshold 传 ``conf_thres``
+      （与旧调用完全相同）；
+    - 结果顺序 = 预测行序（升序）经 NMS 索引重排。
+    """
+    orig_w, orig_h = original_shape
+    if isinstance(outputs, (list, tuple)):
+        # 每个输出 shape (1, 84, N)，取第一个 batch 后按预测维拼接
+        pred = np.concatenate([out[0] for out in outputs], axis=1)
+    else:
+        pred = outputs[0] if outputs.ndim == 3 else outputs
+    pred = pred.transpose(1, 0)                     # (8400, 84)
+
+    boxes = pred[:, :4]                             # 画布坐标 cx, cy, w, h
+    scores = pred[:, 4:]                            # (8400, num_classes)
+    class_ids = np.argmax(scores, axis=1)
+    conf = scores[np.arange(scores.shape[0]), class_ids]
+
+    mask = conf >= conf_thres
+    if keep_class_ids is not None and len(keep_class_ids) > 0:
+        mask &= np.isin(class_ids, np.asarray(sorted(keep_class_ids),
+                                              dtype=np.int64))
+    sel = np.nonzero(mask)[0]
+    if sel.size == 0:
+        return []
+
+    # 画布坐标 → 原图坐标（letterbox 反变换），全部向量化
+    cx = np.clip((boxes[sel, 0] - dw) / scale, 0, orig_w)
+    cy = np.clip((boxes[sel, 1] - dh) / scale, 0, orig_h)
+    w = np.minimum(boxes[sel, 2] / scale, orig_w)
+    h = np.minimum(boxes[sel, 3] / scale, orig_h)
+    # int() 截断（向零取整，与旧实现一致——坐标已 clip 到 >= 0，等价于取整）
+    cx = cx.astype(np.int64)
+    cy = cy.astype(np.int64)
+    w = w.astype(np.int64)
+    h = h.astype(np.int64)
+    conf_s = conf[sel]
+    cid_s = class_ids[sel]
+
+    detections = [
+        {'x': int(cx[i]), 'y': int(cy[i]), 'width': int(w[i]),
+         'height': int(h[i]), 'confidence': float(conf_s[i]),
+         'class_id': int(cid_s[i])}
+        for i in range(sel.size)
+    ]
+
+    # NMS（与旧实现相同的调用：4 元组 (left, top, w, h)、conf_thres 复用作
+    # score_threshold）。旧版此处有一个**每帧打印** NMS 索引的调试输出，
+    # 已删 —— 它在生产路径上每帧刷一行日志。
+    nms_boxes = [[int(cx[i]) - int(w[i]) / 2, int(cy[i]) - int(h[i]) / 2,
+                  int(w[i]), int(h[i])] for i in range(sel.size)]
+    indices = cv2.dnn.NMSBoxes(nms_boxes, conf_s.tolist(),
+                               float(conf_thres), float(nms_thres))
+    if len(indices) > 0:
+        indices = indices.flatten()
+        return [detections[i] for i in indices]
+    return []
+
 
 def postprocess_yolov5(outputs, original_shape, scale, dw, dh, conf_thres, nms_thres):
     """YOLOv5 后处理，返回检测框列表"""
