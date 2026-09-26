@@ -47,6 +47,11 @@ _CLASS_PEN_FALLBACK = ['y', 'c', 'm', (210, 180, 140), (128, 200, 160)]
 
 def _class_pen_color(cls_name):
     canon = canonical_class_name(cls_name or '未知')
+    if canon == '未知':
+        # 「未知」固定红色（2026-09-26 用户定稿）：距离曲线上**没有读数**的帧
+        # （未检出 / 不可测）画成红色 0 线。不能走下面的 hash 兜底 ——
+        # str 哈希带进程随机盐，「未知」的颜色会一次运行一个样。
+        return (214, 40, 40)
     if canon in _CLASS_PEN_COLORS:
         return _CLASS_PEN_COLORS[canon]
     return _CLASS_PEN_FALLBACK[hash(canon) % len(_CLASS_PEN_FALLBACK)]
@@ -229,7 +234,26 @@ class MainWindow(QWidget, Ui_Form):
         self.time_history = deque(maxlen=self.history_len)
         self.time_counter = 0.0
         self._dist_curves = {}       # 类别名 -> 距离曲线
+        # 距离图的图例要**自己管增删**：pyqtgraph 0.14 实测 setData([], [])
+        # 不会撤掉图例项（LegendItem.items 仍持有），留下的是指向空曲线的
+        # 死条目。_dist_legend_on = 当前已登记进图例的类别。
+        self._dist_legend = None
+        self._dist_legend_on = set()
         self._ttc_threshold_lines = []   # [(y, InfiniteLine, TextItem)]
+        # ---- 录制/回放曲线（「测距曲线（录制/回放）」那张图）------------------
+        # 2026-09-26 改版：从「加载时一次性画满 + 播放时纹丝不动」改成
+        # **增量追加、随进度揭示**，并且**录制时就实时画**。
+        #   _curve_pts  已揭示的点 [(t, d, level), ...]（权威，测试读它）
+        #   _curve_xy   分级 -> ([xs], [ys])，避免每次从 _curve_pts 重算
+        #   _curve_items 分级 -> 曲线对象（pyqtgraph 一条线只有一个画笔，
+        #                要在一根线上换色只能按分级分条画）
+        self._curve_pts = []
+        self._curve_xy = {}
+        self._curve_items = {}
+        self._curve_legend_done = False
+        self._replay_ts = []          # 回放会话的**全量**曲线数据（加载时算一次）
+        self._replay_ds = []
+        self._replay_levels = []
         # 初始化状态栏
         self.status_bar=QStatusBar(self)
         self.layout().addWidget(self.status_bar)
@@ -256,14 +280,17 @@ class MainWindow(QWidget, Ui_Form):
         # 先为每个plot控件添加图例，确保曲线名字能显示
         self.plot_sensor_center.addLegend()
         self.plot_sensor_conf.addLegend()
-        self.plot_target_distance.addLegend()
+        self._dist_legend = self.plot_target_distance.addLegend()
         self.plot_sensor_fps.addLegend()
         # 初始化分析曲线控件（确保UI已setupUi）
         # 2026-09-26 改版：原「目标位置分析」(x/y曲线) 改为 TTC 曲线，分级
         # 阈值虚线在 init_analysis_plots 里加；原「尺寸+距离」两图合并为单张
         # 距离图，曲线按目标类别着色、惰性创建（见 update_analysis_plots）。
+        # connect='finite'：ttc_history 里"不可算"的帧记 NaN，曲线在那里断开。
+        # 不能只靠 NaN —— pyqtgraph 默认的 'all' 会静默跳过 NaN 把两侧直连，
+        # 于是"没有 TTC"的时段被画成一条连续的线（实测 0.14.0）。
         self._plot_ttc_curve = self.plot_sensor_center.plot(
-            [], [], pen=pg.mkPen('g', width=2), name="TTC")
+            [], [], pen=pg.mkPen('g', width=2), name="TTC", connect='finite')
         self._plot_sensor_curve_conf = self.plot_sensor_conf.plot([], [], pen=pg.mkPen('b', width=2), name="检测框置信度")
         self._plot_sensor_curve_conf_thres = self.plot_sensor_conf.plot([], [], pen=pg.mkPen('r', width=2, style=Qt.DashLine), name="置信度阈值")
         self._plot_sensor_curve_fps = self.plot_sensor_fps.plot([], [], pen=pg.mkPen('y', width=2), name="检测框FPS")
@@ -475,6 +502,7 @@ class MainWindow(QWidget, Ui_Form):
         self._plot_sensor_curve_fps.setData([], [])
         for curve in self._dist_curves.values():
             curve.setData([], [])
+        self._dist_legend_sync(set())   # 图例跟数据一起清，别留死条目
         # 距离图**不再画方法切换竖虚线**（2026-09-26）：竖线的标签是普通 TextItem，
         # 它的 dataBounds 返回锚点 (0,1)，被 ViewBox 当成数据点 (x, 文字位置+1)
         # 算进 Y 量程；而位置又取自"当前视野顶 × 0.95"，形成正反馈
@@ -491,20 +519,48 @@ class MainWindow(QWidget, Ui_Form):
         vr = self.plot_sensor_center.getViewBox().viewRange()
         for y, _line, txt in self._ttc_threshold_lines:
             txt.setPos(vr[0][1], y)
-        # 距离曲线：一条曲线一个类别，颜色固定映射（图例即类别名）
-        series = {}
+        # 距离曲线（2026-09-26 用户定稿口径）：**未知也要画** ——
+        # 没有读数的帧（未检出目标 / 检出但不可测）画进「未知」曲线：
+        # **红色、距离值拉到 0**，图例标「未知」；有读数的帧画进该类别的
+        # 曲线（颜色按类别，多个类别各自一条）。「未知与标签曲线不能同时
+        # 出现」指**同一时刻**只有一条线，不是整张图只准存在一种。
+        # 整条时间线**连续不断点**：换段处两段**共享边界点**（新段起笔自
+        # 旧段末点、旧段收笔到新段首点）—— 类别线落下到 0、再从 0 回到
+        # 读数，视觉上是同一根线换了颜色；同一类别**再次出现**的多段之间
+        # 用 NaN 隔开（connect='finite'），不会被连成横穿整图的直线
+        # （与回放曲线的分级着色同一手法，见 README 里程碑第 14 条）。
+        frames = []      # (t, key, val)：一帧只属于一条线
         for t, d, c in zip(ts, self.target_distance, self.class_history):
-            series.setdefault(c or '未知', []).append((t, d))
+            if d is None or d != d:            # None / NaN → 这一帧没有读数
+                frames.append((t, '未知', 0.0))
+            else:
+                frames.append((t, c or '未知', float(d)))
+        series = {}     # 类别名 -> [(x, y)…]（同一类别多段之间夹 NaN 点）
+        for i, (t, key, val) in enumerate(frames):
+            pts = series.setdefault(key, [])
+            prev = frames[i - 1] if i > 0 else None
+            if prev is not None and prev[1] != key:
+                if pts:                                        # 本类别上一段先收尾
+                    pts.append((float('nan'), float('nan')))
+                pts.append((prev[0], prev[2]))                 # 起笔自旧段末点
+                series[prev[1]].append((t, val))               # 旧段收笔到本段首点
+            pts.append((t, val))
         for cls, pts in series.items():
             curve = self._dist_curves.get(cls)
             if curve is None:
                 curve = self.plot_target_distance.plot(
-                    [], [], pen=pg.mkPen(_class_pen_color(cls), width=2), name=cls)
+                    [], [], pen=pg.mkPen(_class_pen_color(cls), width=2),
+                    name=cls, connect='finite')
                 self._dist_curves[cls] = curve
+                self._dist_legend_on.add(cls)   # plot(name=) 已自动登记图例
+                if cls == '未知':
+                    # 红色段压在类别线之上：拉到 0 / 回到读数的斜线务必显示红色
+                    curve.setZValue(10)
             curve.setData([p[0] for p in pts], [p[1] for p in pts])
         for cls, curve in self._dist_curves.items():
             if cls not in series:
                 curve.setData([], [])       # 该类别滚出窗口后清空
+        self._dist_legend_sync(set(series))     # 图例跟随类别的出现/消失
         # 方法信息只走下方提示行（图上不再画竖虚线，理由见 init_analysis_plots）
         # 置信度 / FPS 曲线
         self._plot_sensor_curve_conf.setData(ts, list(self.sensor_history_conf))
@@ -532,6 +588,29 @@ class MainWindow(QWidget, Ui_Form):
             self.label_conf.setText("置信度低于阈值！")
         else:
             self.label_conf.setText("置信度正常")
+
+    def _dist_legend_sync(self, active):
+        """距离图的图例与「当前真正有数据的类别」严格一致。
+
+        pyqtgraph 0.14 实测：``setData([], [])`` **不会**撤掉图例项
+        （``LegendItem.items`` 仍持有它），于是会出现「图例说有这类目标、
+        线上却没数据」的死条目。图例是给人读「这条线是什么」的，条目必须
+        和线上真有数据一一对应，所以这里显式增删。
+        """
+        if self._dist_legend is None:
+            return
+        for cls in list(self._dist_legend_on):
+            if cls not in active:
+                curve = self._dist_curves.get(cls)
+                if curve is not None:
+                    self._dist_legend.removeItem(curve)
+                self._dist_legend_on.discard(cls)
+        for cls in active:
+            if cls not in self._dist_legend_on:
+                curve = self._dist_curves.get(cls)
+                if curve is not None:
+                    self._dist_legend.addItem(curve, cls)
+                    self._dist_legend_on.add(cls)
 
     def _refresh_ttc_hint(self):
         """TTC 分析图下方的告警提示（与监视页 TTC 同源：TTCResult → 分级）。"""
@@ -1514,6 +1593,10 @@ class MainWindow(QWidget, Ui_Form):
 
         self._rec_seq = 0
         self._rec_t0 = time.time()
+        # 录制时曲线**实时增长**（用户要求）：从空开始，每帧追加一个点，
+        # 时间轴用「距开始录制的秒数」—— 与数据轨 FrameRecord.t 同一个式子，
+        # 所以录完自动挂回放时曲线与进度条严丝合缝，不需要重画。
+        self._curve_clear()
         self.btn_rec_toggle.setText('停止录制')
         self.label_rec_status.setText('● 录制中')
         self.label_rec_info.setText(
@@ -1560,7 +1643,8 @@ class MainWindow(QWidget, Ui_Form):
             f'丢帧 {meta.dropped_frames}{warn}'
         )
         # 录完自动挂到回放器上 —— 之前要手动再点「选择录制」，容易以为没存上
-        if self._load_replay_session(session_dir):
+        # keep_curve=True：曲线在录制过程中已经实时画出来了，别在停止这一刻清掉
+        if self._load_replay_session(session_dir, keep_curve=True):
             self.status_bar.showMessage(
                 f'录制完成，已自动加载回放：{meta.session}', 5000)
 
@@ -1606,10 +1690,13 @@ class MainWindow(QWidget, Ui_Form):
             self.status_bar.showMessage(
                 f'已加载录制：{self.replayer.meta.session}', 3000)
 
-    def _load_replay_session(self, session_dir: str) -> bool:
+    def _load_replay_session(self, session_dir: str, keep_curve: bool = False) -> bool:
         """把一个录制会话挂到回放器上。失败弹窗说明原因并返回 False。
 
         失败时保留之前已加载的会话（换片失败不应该把手头的片也弄丢）。
+
+        ``keep_curve=True`` 用于「录完自动挂回放」：曲线在录制过程中已经实时
+        长出来了，没必要在停止那一刻清空再重画一遍（见 _prepare_replay_curve）。
         """
         # 回放中直接换片：先停定时器，避免旧定时器继续驱动
         if self.replay_timer is not None and self.replay_timer.isActive():
@@ -1625,6 +1712,9 @@ class MainWindow(QWidget, Ui_Form):
         if not replayer.open():
             QMessageBox.critical(self, '加载失败', 'video.avi 无法打开。')
             return False
+        # 换片时关掉上一个会话的视频句柄（否则反复选片会漏文件句柄）
+        if self.replayer is not None:
+            self.replayer.close()
         self.replayer = replayer
         self.play_index = 0
         total = self.replayer.total_frames
@@ -1636,6 +1726,8 @@ class MainWindow(QWidget, Ui_Form):
             f'数据轨 {len(self.replayer.records)} 条 · '
             f'丢帧 {self.replayer.meta.dropped_frames}'
         )
+        # 曲线数据算一次；画多少由播放进度决定（进度 0 → 曲线为空）
+        self._prepare_replay_curve(keep=keep_curve)
         self.show_replay_summary()
         return True
 
@@ -1654,12 +1746,16 @@ class MainWindow(QWidget, Ui_Form):
         if self.replayer.finished:
             self.replayer.seek(0)
             self.play_index = 0
+            self._curve_follow_replay(0)   # 从头播 → 曲线也从头长
 
         if self.replay_timer is None:
             self.replay_timer = QTimer()
-            interval = int(1000 / max(self.global_params.fps, 1))
-            self.replay_timer.setInterval(interval)
             self.replay_timer.timeout.connect(self.on_replay_tick)
+        # 间隔按**会话真实帧率**（帧数/真实时长）而不是相机设置里的 fps：
+        # VideoWriter 用名义 30 fps 写文件头，本机实际只写出约 18.6 fps ——
+        # 按 30 播就是 1.6 倍快放（376 帧的真实会话长 20.17 s，快放只剩 12.5 s），
+        # 曲线与进度条再怎么同步也是"一起快放"。回放要按录时的速度走。
+        self.replay_timer.setInterval(self.replayer.frame_interval_ms)
 
         # 回放期间停掉摄像头取帧，避免两路画面互相覆盖
         if self.camera_timer.isActive():
@@ -1676,6 +1772,12 @@ class MainWindow(QWidget, Ui_Form):
             self.replayer.seek(0)
             self.play_index = 0
             self.label_play_pos.setText(f'0/{self.replayer.total_frames}')
+            # 进度条归零 → 曲线也归零（用户要求的"曲线与进度条同步"）。
+            # 进度条本身也必须归零：以前只重置了标签与 play_index，进度条停在
+            # 最右端，于是"停止后进度条在末尾、曲线是空的"——仍然是不同步。
+            # 注意这里是 setValue（不触发 sliderMoved），不会反过来调用 seek。
+            self.slider_play_pos.setValue(0)
+            self._curve_follow_replay(0)
         # 恢复实时画面
         if not self.camera_timer.isActive():
             self.camera_timer.start()
@@ -1702,8 +1804,11 @@ class MainWindow(QWidget, Ui_Form):
         # 把数据轨记录还原成检测字典，复用实时链路的展示与绘图逻辑。
         # **先还原状态、再画帧**：画面上的框与距离标签必须就是这一帧的数据
         # （原先先画后赋值，框和读数都比画面滞后一帧）。
-        # 距离取**规范值**（canonical_distance_at）：新格式录制里就是当时
+        # 距离取**规范值**（canonical_distance_at_frame）：新格式录制里就是当时
         # 屏幕上的那个数，旧格式现场补做同参数去噪 —— 与曲线、摘要同源。
+        # ⚠️ 必须用**帧序号**取（不是记录下标）：视频轨与数据轨不是一比一
+        #    （376 帧 vs 94 条记录），旧写法用帧序号当记录下标，后 75% 的播放
+        #    时间全部拿到 None —— 画面无框、无距离，正是"只有进度条在动"的来源。
         target = None
         if rec is not None and rec.has_target:
             target = {
@@ -1718,7 +1823,7 @@ class MainWindow(QWidget, Ui_Form):
             self.global_params.detection_height = rec.height
             self.global_params.detection_conf = rec.confidence
             self.global_params.target_category = rec.class_name or '未知'
-            self.global_params.distance = self.replayer.canonical_distance_at(
+            self.global_params.distance = self.replayer.canonical_distance_at_frame(
                 self.play_index - 1)
         else:
             self.last_detection = None
@@ -1727,6 +1832,8 @@ class MainWindow(QWidget, Ui_Form):
         self._display_frame(frame)
 
         if not self._replay_seeking:
+            # 曲线随进度揭示：与进度条同一个时间基，同一帧推进同一个点数
+            self._curve_follow_replay(self.play_index - 1)
             total = self.replayer.total_frames
             self.label_play_pos.setText(f'{self.play_index}/{total}')
             if total > 0:
@@ -1775,7 +1882,8 @@ class MainWindow(QWidget, Ui_Form):
 
     @Slot(int)
     def on_play_seek(self, value):
-        """拖动进度条定位。"""
+        """拖动进度条定位。曲线**立刻**揭示到该位置（可当缩略图用：拖到最右
+        就看到整段曲线，不用等播完）。"""
         if self.replayer is None:
             return
         total = self.replayer.total_frames
@@ -1787,18 +1895,23 @@ class MainWindow(QWidget, Ui_Form):
             self.replayer.seek(target_idx)
             self.play_index = target_idx
             self.label_play_pos.setText(f'{target_idx}/{total}')
+            self._curve_follow_replay(target_idx)
         finally:
             self._replay_seeking = False
 
     def show_replay_summary(self):
-        """回放数据的统计摘要 + 测距曲线。
+        """回放数据的统计摘要（整段会话的统计 + 坐标轴设置）。
 
-        曲线画**规范距离**（去噪后），并按 TTC 分级分段着色：
-        一条曲线的哪几段是"提示/预警/危险"，颜色直接对应分级，
-        比看数字更容易读出一段录制里到底什么时候危险。
+        曲线**不在这里画**（2026-09-26 改版）：曲线数据的准备在
+        ``_prepare_replay_curve``（加载会话时算一次），画多少由**回放进度**
+        决定（``_curve_follow_replay``）。理由：用户要的是「曲线与进度条同时
+        加载」，而不是加载时一次画满、播放时纹丝不动 —— 旧实现就是后者，
+        表现出来的现象正是「点播放只有进度条在动」。切页签重进时也不该把
+        曲线重置回起点，所以这里只刷文字与轴标签。
 
-        曲线只画有值的点：距离为 None 的帧不画 0 ——
-        0 米是"有效但错误"的读数，None 是"没有读数"，两者在图上必须可区分。
+        曲线的口径仍是**规范距离**（去噪后）按 TTC 分级分段着色，
+        且只画有值的点：距离为 None 的帧不画 0 —— 0 米是"有效但错误"的读数，
+        None 是"没有读数"，两者在图上必须可区分。
         """
         if self.replayer is None:
             return
@@ -1822,9 +1935,6 @@ class MainWindow(QWidget, Ui_Form):
             f'{src_txt}'
         )
 
-        ts, ds = self.replayer.canonical_distance_series()
-        levels = self._replay_ttc_levels()
-        self._draw_replay_segments(ts, ds, levels)
         self.plot_replay_distance.setLabel('bottom', '时间', units='s')
         self.plot_replay_distance.setLabel('left', '距离', units='m')
         self.plot_replay_distance.showGrid(x=True, y=True)
@@ -1852,42 +1962,123 @@ class MainWindow(QWidget, Ui_Form):
                 levels.append(res.level)
         return levels
 
-    def _draw_replay_segments(self, ts, ds, levels):
-        """把回放曲线按 TTC 分级切成若干段，每段一种颜色。
+    # ---- 录制/回放曲线：按 TTC 分级分段着色（增量追加）----------------------
+    #
+    # 为什么要从「整条重画」改成「增量追加」（2026-09-26 用户反馈驱动）：
+    #   ① 用户要的是**曲线与进度条同步增长**，而不是加载时一次画满、
+    #      播放时纹丝不动（旧实现就是后者 —— 点播放只有进度条在动）。
+    #   ② 逐帧揭示时若每次 removeItem + 新建 N 个段对象，长会话下每帧
+    #      都要重建几十个 item，纯浪费 CPU；追加则是 O(1) 一笔。
+    #   ③ 录制时也要画同一条曲线，两条路径共用同一套「揭示到第几个点」模型，
+    #      时间基统一为**会话真实秒**（与数据轨 FrameRecord.t 同一个口径）。
+    #
+    # 为什么「一个分级一条 item」还不够，必须再用 NaN 断开（同日二次反馈）：
+    #   pyqtgraph 的画笔是**每条 item 一个颜色**，所以「一根线换色」只能拆成
+    #   多条 item —— 但拆法有两种，第一种是错的：
+    #     ✗ 把同一分级的**所有**点攒进一个 item：pyqtgraph 按数组顺序连折线，
+    #       同一个分级在一段会话里出现多段不相邻区间时（实测最近一次录制：
+    #       灰色 4 段、预警 2 段、危险 2 段），同色两段之间会被拉出一条
+    #       **横穿整幅图**的直线 —— 用户看到的就是「应该是一条线，怎么有
+    #       好多条线」。
+    #     ✓ 在那条 item 里、每段末尾补一个 **NaN** 收尾，并让 item 用
+    #       ``connect='finite'``：栅格化时 NaN 前后不再相连，同色的多段各自
+    #       独立。已实测（`probe_curve_break.py`）：`finite` + NaN → 路径断成
+    #       2 条独立子路径；`all` + NaN → 仍是一条（**只加 NaN 不够**）。
+    #   这样 item 数恒 ≤ 4（每个分级一条），图例天然是「每级一行」，
+    #   不必手工维护；视觉上就是「一条曲线，颜色分段」。
 
-        pyqtgraph 的一条曲线只有一个画笔，要在一根线上换色只能**分段画**。
-        相邻段之间复用边界点（后一段起点接前一段终点），否则线会在换色处
-        断开，看起来像丢帧。
+    def _curve_item(self, level):
+        """取该 TTC 分级对应的曲线对象；没有就建（图例只在建立时登记一次）。
+
+        level 是 ``TTCLevel`` 枚举，颜色与监视页告警色同值（见
+        ``_TTC_LEVEL_COLORS``），图例文案带各级阈值（``_ttc_level_legend_name``）。
+
+        ``connect='finite'`` 是必须的：它让同一条 item 里被 NaN 隔开的多段
+        各自独立成线（见本节顶部说明），少了它就只剩一条横穿线。
         """
-        plot = self.plot_replay_distance
-        if not getattr(self, '_replay_legend_done', False):
-            plot.addLegend()
-            self._replay_legend_done = True
-        for item in getattr(self, '_replay_seg_items', []):
-            plot.removeItem(item)
-        self._replay_seg_items = []
-        if not ts:
-            return
+        item = self._curve_items.get(level)
+        if item is None:
+            if not self._curve_legend_done:
+                self.plot_replay_distance.addLegend()
+                self._curve_legend_done = True
+            item = self.plot_replay_distance.plot(
+                [], [], pen=pg.mkPen(_TTC_LEVEL_COLORS[level], width=2),
+                name=_ttc_level_legend_name(level, self._ttc.cfg),
+                connect='finite')
+            self._curve_items[level] = item
+        return item
 
-        cfg = self._ttc.cfg
-        segs = []
-        start = 0
-        for i in range(1, len(ts) + 1):
-            if i == len(ts) or levels[i] != levels[start]:
-                segs.append((start, i - 1, levels[start]))
-                start = i
-        named = set()
-        for a, b, lv in segs:
-            # 段尾多带一个点（下一段的起点），保证换色处不断线
-            end = min(b + 1, len(ts) - 1)
-            xs, ys = ts[a:end + 1], ds[a:end + 1]
-            name = None
-            if lv not in named:        # 每级只在图例里出现一次
-                named.add(lv)
-                name = _ttc_level_legend_name(lv, cfg)
-            item = plot.plot(xs, ys, pen=pg.mkPen(_TTC_LEVEL_COLORS[lv],
-                                                  width=2), name=name)
-            self._replay_seg_items.append(item)
+    def _curve_clear(self):
+        """清空曲线（换会话 / 重新播放 / 停止回放）。"""
+        self._curve_pts = []
+        self._curve_xy = {}
+        for item in self._curve_items.values():
+            item.setData([], [])
+
+    def _curve_push(self, t, d, level):
+        """追加一个点。
+
+        换级时做两件事，缺一不可：
+
+        ① **旧分级补一个 NaN 收尾** —— 把该分级**已画过的段**封口，否则它
+           与「本分级以后再出现的新段」会被连成一条横穿线（见本节顶部说明）。
+        ② **新分级复制上一段末点**作起点 —— 否则换色处会断开，看着像丢帧。
+        """
+        prev = self._curve_pts[-1] if self._curve_pts else None
+        turning = prev is not None and prev[2] != level
+        self._curve_pts.append((t, d, level))
+        if turning:
+            pxs, pys = self._curve_xy[prev[2]]      # prev 一定 push 过
+            pxs.append(t)
+            pys.append(float('nan'))
+            self._curve_item(prev[2]).setData(pxs, pys)
+        xs, ys = self._curve_xy.setdefault(level, ([], []))
+        if turning:
+            xs.append(prev[0])
+            ys.append(prev[1])
+        xs.append(t)
+        ys.append(d)
+        self._curve_item(level).setData(xs, ys)
+
+
+    def _curve_rebuild(self, points):
+        """按给定点序列重建整条曲线（往回拖进度条时用）。"""
+        self._curve_clear()
+        for t, d, lv in points:
+            self._curve_push(t, d, lv)
+
+    def _curve_follow_replay(self, frame_index):
+        """把曲线揭示到 ``frame_index`` 这一帧（与进度条同一个时间基）。
+
+        常态是**前进**（只补差量）；往回拖进度条时点数变少 → 重建；
+        停止回放 = 揭示到第 0 帧 = 清空 —— 于是「进度条在哪，曲线就到哪」。
+        """
+        if self.replayer is None or not self._replay_ts:
+            return
+        want = self.replayer.points_upto_frame(frame_index)
+        cur = len(self._curve_pts)
+        if want == cur:
+            return
+        pts = list(zip(self._replay_ts, self._replay_ds, self._replay_levels))
+        if want < cur:
+            self._curve_rebuild(pts[:want])
+        else:
+            for p in pts[cur:want]:
+                self._curve_push(*p)
+
+    def _prepare_replay_curve(self, keep=False):
+        """加载会话后准备曲线数据（全量算一次，含逐帧 TTC 分级）。
+
+        ``keep=True`` 用于「录完自动挂回放」：曲线在录制时已经实时长出来，
+        而且用的就是同一批数据，没必要在停止那一刻清空再画一遍。
+        """
+        ts, ds = self.replayer.canonical_distance_series()
+        levels = self._replay_ttc_levels()
+        self._replay_ts, self._replay_ds, self._replay_levels = ts, ds, levels
+        if keep and ts:
+            self._curve_rebuild(list(zip(ts, ds, levels)))
+        else:
+            self._curve_clear()
 
     def update_param_realtime(self,param_name,value,label,fmt):
         setattr(self.global_params,param_name,value)
@@ -1904,14 +2095,23 @@ class MainWindow(QWidget, Ui_Form):
             self.init_analysis_plots()
             if not self.analysis_timer.isActive():
                 self.analysis_timer.start()
-        elif currebt_tab=='设置':
+            return
+        # 非深度分析页一律停曲线刷新（2026-09-26 修）：
+        # 旧写法把 stop 放在 elif 链的最后一段，而「设置」「录制回放」都有
+        # 自己的分支 —— 从深度分析切到这两页时 stop 永远走不到，每 50ms
+        # 白刷 4 张不可见的图（回放也不喂分析历史，刷的还是同一批旧数据）。
+        # 对照实测（measure_replay_tick.py，回放单帧预算=录时真实帧间隔 67ms）：
+        #   全开（真实使用状态） 单帧中位 42.3ms · P90 95.5ms · 23% 帧超预算
+        #   停掉 analysis_timer  单帧中位 37.2ms · P90 64.7ms ·  3% 帧超预算
+        # 这正是"回放遇到大范围移动会卡一下"的主因之一。
+        if self.analysis_timer.isActive():
+            self.analysis_timer.stop()
+        if currebt_tab=='设置':
             self.refresh_calib_widgets()
             self.refresh_camera_widgets()
         elif currebt_tab=='录制回放':
             if self.replayer is not None:
                 self.show_replay_summary()
-        elif self.analysis_timer.isActive() and currebt_tab!='深度分析' and self.global_params.plot_enable:
-            self.analysis_timer.stop()     
                 
     @Slot()
     def on_calibrate_clicked(self):
@@ -2260,18 +2460,22 @@ class MainWindow(QWidget, Ui_Form):
                 + float(self.global_params.detection_height) / 2.0)
 
         if self.global_params.plot_enable:
-            # 距离为 None 时曲线落 0（pyqtgraph 不画 None），但状态栏与录制
-            # 里的值保持 None —— 绝不把"没有读数"伪装成"读到 0 米"
-            distance = dist if dist is not None else 0.0
+            # 不可测的帧记 **NaN**：历史里保住「没有读数」的语义，不伪装成 0。
+            # 显示归显示 —— update_analysis_plots 把这些帧映射成「未知」段：
+            # 红色、值拉到 0、整条时间线不断点（2026-09-26 用户定稿：
+            # 未知要画出来标红，而不是断开或消失）。
+            # TTC 轨迹同一个口径（那里也记 NaN）。
             self.sensor_history_conf.append(self.global_params.detection_conf)
             self.sensor_history_fps.append(self.global_params.inference_fps)
-            self.target_distance.append(distance)
+            self.target_distance.append(
+                float(dist) if dist is not None else float('nan'))
             # 类别轨迹（距离曲线按类别着色）+ 方法轨迹（只喂下方提示行）
             self.class_history.append(self.global_params.target_category or '未知')
             self.method_history.append(
                 '不可测' if dist is None or res is None
                 else (res.method or '几何测距'))
-            # TTC 轨迹：不可算的帧记 NaN（pyqtgraph 画成断线，不冒充 0 秒）
+            # TTC 轨迹：不可算的帧记 NaN → 配合曲线的 connect='finite' 断线，
+            # 不冒充 0 秒（单记 NaN 不够，见 __init__ 里该曲线的注释）
             self.ttc_history.append(
                 ttc_res.ttc if ttc_res.available else float('nan'))
             self.ttc_reason_history.append(
@@ -2294,7 +2498,14 @@ class MainWindow(QWidget, Ui_Form):
                 distance_raw=raw_dist,
                 inference_fps=self.global_params.inference_fps,
             ))
-            
+            # 录制中同步画曲线（用户要求）。只记**有读数**的点，与回放曲线
+            # （canonical_distance_series 跳过 None）口径一致；时间轴与上面
+            # push_record 的 t 同式，所以录完切回放时曲线不用重画就对得上。
+            # 分级用同一帧的 TTC 结果 → 录制时就能看见哪几段进入提示/预警/危险。
+            if dist is not None:
+                self._curve_push(time.time() - self._rec_t0, dist,
+                                 ttc_res.level)
+
     def _on_calib_frame(self, frame_bgr):
         """标定采集回调：检测棋盘格角点并给出实时反馈。
 

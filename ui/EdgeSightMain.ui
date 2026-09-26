@@ -505,7 +505,7 @@ QLineEdit, QTextEdit {
                        <number>1</number>
                       </property>
                       <property name="value">
-                       <number>50</number>
+                       <number>40</number>
                       </property>
                       <property name="orientation">
                        <enum>Qt::Orientation::Horizontal</enum>
@@ -515,7 +515,7 @@ QLineEdit, QTextEdit {
                     <item>
                      <widget class="QLabel" name="label_confidence_thres">
                       <property name="text">
-                       <string>0.50</string>
+                       <string>0.40</string>
                       </property>
                      </widget>
                     </item>
@@ -1615,7 +1615,7 @@ QLineEdit, QTextEdit {
        <item>
         <widget class="QGroupBox" name="groupBox_play_plot">
          <property name="title">
-          <string>测距曲线（回放）</string>
+          <string>测距曲线（录制/回放）</string>
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_playplot">
           <item>

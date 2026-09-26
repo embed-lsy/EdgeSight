@@ -30,7 +30,13 @@ class GlobalParams:
         #检测配置
         self.sample_freq=30  #数据采样频率，单位Hz
         self.base_width=100 #目标基准宽度（旧伪距公式遗留，已被真标定取代，保留备用）
-        self.confidence_thres=0.25
+        # 置信度阈值 0.40（2026-09-26 用户反复实测定的值）：
+        #   · 低于 0.40：会放进「肢体」而不是完整身体 —— 框不完整意味着
+        #     框底边不是脚，接触点法/反解身高判据的前提就不成立，测距直接错；
+        #   · 高于 0.40：无效帧明显增多（曲线断、TTC 无样本）。
+        # 该阈值下**最小可检测距离约 0.57 m**（再近检测器不出框）——
+        # 这是**检测器**的能力下限，不是测距算法的下限，不要试图往下救。
+        self.confidence_thres=0.40
         self.nms_thres=0.45
         self.target_select_rule=0
         self.specific_class='笔记本电脑'

@@ -39,6 +39,7 @@ CHARTER 的成功判据里有一条是「**有录制回放：能录一段视频�
 
 from __future__ import annotations
 
+import bisect
 import json
 import os
 import queue
@@ -353,6 +354,8 @@ class Replayer:
         self._cap: Optional[cv2.VideoCapture] = None
         self._index = 0
         self._canon: Optional[List[Optional[float]]] = None   # 规范距离缓存
+        self._rec_ts: Optional[List[float]] = None            # 记录时间戳缓存
+        self._dist_pref: Optional[List[int]] = None           # 有读数条数前缀和
 
     # -- 加载 ---------------------------------------------------------------
 
@@ -424,7 +427,12 @@ class Replayer:
         return bool(self._cap is not None and self._cap.isOpened())
 
     def read(self):
-        """读下一帧。返回 ``(frame_bgr, record_or_None)``，结束后返回 (None, None)。"""
+        """读下一帧。返回 ``(frame_bgr, record_or_None)``，结束后返回 (None, None)。
+
+        记录按**时间**取（``record_at_frame``），不是 ``records[帧序号]`` ——
+        两者数量不同（实测 376 帧对 94 条记录），拿帧序号直接索引会让后
+        75% 的播放时间全都拿到 None（画面无框、无距离）。
+        """
         if self._cap is None:
             return None, None
         ok, frame = self._cap.read()
@@ -432,10 +440,7 @@ class Replayer:
             return None, None
         idx = self._index
         self._index += 1
-        rec = None
-        if 0 <= idx < len(self.records):
-            rec = self.records[idx]
-        return frame, rec
+        return frame, self.record_at_frame(idx)
 
     def seek(self, index: int) -> bool:
         """跳转到指定帧。用于在分析曲线上点选定位。"""
@@ -514,6 +519,92 @@ class Replayer:
                 ts.append(r.t)
                 ds.append(d)
         return ts, ds
+
+    # -- 帧 ↔ 时间 ↔ 记录：两轨对齐（2026-09-26 新增）----------------------
+    #
+    # **数据轨与视频轨不是一比一，绝不能拿帧序号当记录序号用。**
+    #
+    # 实测（三个录制会话一致）：视频轨按名义 fps_nominal=30 写头，本机实际只能
+    # 写出约 18.6 fps —— 376 帧的真实会话长 20.17 s，按 30 fps 播放只有 12.53 s
+    # （**1.61 倍快放**）；而数据轨是「一次检测回调一条」，只有 94 条。旧实现
+    # ``records[frame_index]`` 于是只覆盖前 94 帧，**后 282 帧（75%）read() 返回
+    # rec=None → 画面无框、无距离、曲线也无从对齐**（用户看到"只有进度条在动"
+    # 的直接来源之一）。
+    #
+    # 正解：以**真实秒**为唯一时间基。帧序号 → 秒用 fps_actual（帧数/真实时长，
+    # 丢帧为 0 时帧等间隔写出，这个换算是精确的）；再由「t ≤ 该秒」取记录。
+    # 三个会话实测丢帧均为 0，故不引入近似。
+
+    @property
+    def fps_actual(self) -> float:
+        """视频轨的**真实**帧率 = 写出帧数 / 会话真实时长（s）。
+
+        名义 fps 是 VideoWriter 写在文件头里的声明值，**不等于**本机真实
+        写出帧率（实测 30 对 18.6）。任何「帧 ↔ 秒」换算都必须用本值。
+        """
+        if self.meta.duration_s > 0 and self.meta.frame_count > 0:
+            return self.meta.frame_count / self.meta.duration_s
+        return self.meta.fps_nominal or 30.0
+
+    @property
+    def frame_interval_ms(self) -> int:
+        """按真实帧率播放一帧应有的间隔（毫秒），供回放定时器使用。"""
+        return max(int(round(1000.0 / max(self.fps_actual, 1e-6))), 1)
+
+    def frame_time(self, index: int) -> float:
+        """帧序号 → 会话真实秒（从录制开始的相对秒）。"""
+        return max(int(index), 0) / max(self.fps_actual, 1e-6)
+
+    def _record_times(self) -> List[float]:
+        if self._rec_ts is None:
+            self._rec_ts = [r.t for r in self.records]
+        return self._rec_ts
+
+    def record_index_at_frame(self, index: int) -> int:
+        """帧序号 → 该时刻应显示的数据轨记录下标；没有则 -1。
+
+        取「t ≤ 该帧真实秒」的**最后一条**记录：数据轨约 4.7 Hz、视频轨约
+        18.6 Hz，一条记录要覆盖它之后、下一条记录之前的所有帧。
+        """
+        ts = self._record_times()
+        if not ts:
+            return -1
+        k = bisect.bisect_right(ts, self.frame_time(index)) - 1
+        return k if k >= 0 else -1
+
+    def record_at_frame(self, index: int) -> Optional[FrameRecord]:
+        """帧序号对应的记录（无则 None）。``read()`` 与 UI 都走这里。"""
+        k = self.record_index_at_frame(index)
+        return self.records[k] if k >= 0 else None
+
+    def canonical_distance_at_frame(self, index: int) -> Optional[float]:
+        """帧序号对应的**规范距离**（无记录 / 该记录无读数则 None）。
+
+        UI 回放画面上的读数必须用这个：曲线按帧揭示、读数按帧取值，
+        两者才不会一个走帧、一个走记录下标。
+        """
+        k = self.record_index_at_frame(index)
+        return None if k < 0 else self.canonical_distances()[k]
+
+    def points_upto_frame(self, index: int) -> int:
+        """该帧时刻曲线上应有几个点（t ≤ 该秒且**有读数**的记录条数）。
+
+        回放按进度揭示曲线就用它：点数只增不减地跟随帧前进，
+        与进度条同一个时间基。
+        """
+        k = self.record_index_at_frame(index)
+        if k < 0:
+            return 0
+        return self._dist_prefix()[k + 1]
+
+    def _dist_prefix(self) -> List[int]:
+        """前缀计数：``prefix[i]`` = 前 i 条记录里有读数的条数。"""
+        if self._dist_pref is None:
+            pref = [0]
+            for d in self.canonical_distances():
+                pref.append(pref[-1] + (1 if d is not None else 0))
+            self._dist_pref = pref
+        return self._dist_pref
 
     def summary(self) -> Dict[str, Any]:
         """回放数据的统计摘要，用于事后分析面板。

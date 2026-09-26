@@ -402,7 +402,7 @@ class Ui_Form(object):
         self.slider_confidence_thres.setMinimum(10)
         self.slider_confidence_thres.setMaximum(90)
         self.slider_confidence_thres.setPageStep(1)
-        self.slider_confidence_thres.setValue(50)
+        self.slider_confidence_thres.setValue(40)
         self.slider_confidence_thres.setOrientation(Qt.Orientation.Horizontal)
 
         self.horizontalLayout_3.addWidget(self.slider_confidence_thres)
@@ -1229,7 +1229,7 @@ class Ui_Form(object):
         self.label_mount_status.setText(QCoreApplication.translate("Form", u"\u5b89\u88c5\u53c2\u6570\u81ea\u6807\u5b9a\uff1a\u628a\u76ee\u6807\u6446\u5230\u5377\u5c3a\u5df2\u77e5\u8ddd\u79bb\u5904\u3001\u9759\u6b62\uff0c\u70b9\u300c\u8bb0\u4e3a\u91c7\u6837\u70b9\u300d\u3002\u63a8\u8350 2 m / 5 m / 10 m \u4e09\u70b9\uff08\u4e24\u70b9\u65e0\u6cd5\u81ea\u67e5\u9519\u8bef\u6807\u8bb0\uff09", None))
         self.groupBox_10.setTitle(QCoreApplication.translate("Form", u"\u6a21\u578b\u53c2\u6570\u5b9e\u65f6\u5fae\u8c03", None))
         self.label_23.setText(QCoreApplication.translate("Form", u" \u7f6e\u4fe1\u5ea6\u9608\u503c\uff1a", None))
-        self.label_confidence_thres.setText(QCoreApplication.translate("Form", u"0.50", None))
+        self.label_confidence_thres.setText(QCoreApplication.translate("Form", u"0.40", None))
         self.label_25.setText(QCoreApplication.translate("Form", u" NMS\u9608\u503c\uff1a", None))
         self.label_nms_thres.setText(QCoreApplication.translate("Form", u"0.45", None))
         self.groupBox_4.setTitle(QCoreApplication.translate("Form", u"\u7cfb\u7edf\u6027\u80fd", None))
@@ -1317,7 +1317,7 @@ class Ui_Form(object):
         self.btn_play_stop.setText(QCoreApplication.translate("Form", u"\u505c\u6b62", None))
         self.label_play_pos.setText(QCoreApplication.translate("Form", u"0/0", None))
         self.label_play_info.setText(QCoreApplication.translate("Form", u"\u672a\u9009\u62e9\u5f55\u5236\u3002\u56de\u653e\u89c6\u9891\u8f68\u4e0e\u6570\u636e\u8f68\u540c\u6b65\uff0c\u53ef\u5728\u4e0b\u65b9\u67e5\u770b\u6d4b\u8ddd\u66f2\u7ebf\u3002", None))
-        self.groupBox_play_plot.setTitle(QCoreApplication.translate("Form", u"\u6d4b\u8ddd\u66f2\u7ebf\uff08\u56de\u653e\uff09", None))
+        self.groupBox_play_plot.setTitle(QCoreApplication.translate("Form", u"\u6d4b\u8ddd\u66f2\u7ebf\uff08\u5f55\u5236/\u56de\u653e\uff09", None))
         self.label_replay_summary.setText(QCoreApplication.translate("Form", u"\u5c1a\u65e0\u56de\u653e\u6570\u636e\u3002", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_record), QCoreApplication.translate("Form", u"\u5f55\u5236\u56de\u653e", None))
     # retranslateUi
