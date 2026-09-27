@@ -178,27 +178,18 @@ class YOLODetector(QObject):
         self.detection_ready.emit(target)
 
     def select_target(self, detections, img_shape):
-        """按选择规则从本帧检测里挑出唯一跟踪目标。
+        """从本帧检测里挑出唯一跟踪目标：取置信度最高者。
 
-        2026-09-26 修复两处：
-        1. 旧版开头有 ``if not self.global_params.detection_conf: return 最高置信度``
-           —— ``detection_conf`` 是**当前目标置信度的显示值**（初值 0.0、
-           无目标帧被清 0），却被当成"规则开关"用。程序启动后它几乎恒为 0，
-           于是设置页选什么规则都静默走最高置信度 —— "检测配置没有生效"
-           的直接原因。现在规则每帧无条件生效。
-        2. 规则精简为两条（用户建议，旧"最大面积/最接近中心"已从 UI 删除）：
-           0 = 最高置信度（默认）；1 = 指定类别（按 specific_class_id 过滤，
-           同类多框取置信度最高，无该类则本帧无目标）。
-           旧值 1/2/3 兜底按规则 0 处理（target_select_rule 不持久化，
-           重启必为 0，不存在旧值残留）。
+        2026-09-26 修复（保留）：旧版开头有
+        ``if not self.global_params.detection_conf: return 最高置信度`` ——
+        ``detection_conf`` 是**当前目标置信度的显示值**（初值 0.0、无目标帧被清 0），
+        却被当成"规则开关"用，导致设置页选什么规则都静默走最高置信度。
+        该短路已删除，规则每帧无条件生效。
+
+        CHARTER v1.4（全链路唯一类别是「行人」）：原规则 1「指定类别」随多类别
+        一并删除 —— 单类别下它恒不命中，只会让本帧静默无目标，是个死规则。
+        入参 ``detections`` 已由 person 白名单过滤（见 ``_refresh_person_class_ids``）。
         """
         if not detections:
             return None
-        rule = getattr(self.global_params, 'target_select_rule', 0)
-        if rule == 1:
-            specific_class = getattr(self.global_params, 'specific_class_id', -1)
-            filtered = [d for d in detections if d['class_id'] == specific_class]
-            if not filtered:
-                return None
-            return max(filtered, key=lambda d: d['confidence'])
         return max(detections, key=lambda d: d['confidence'])

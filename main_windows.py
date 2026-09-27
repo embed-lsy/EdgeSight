@@ -31,30 +31,29 @@ import time
 
 
 # ---------------------------------------------------------------------------
-# 深度分析「距离按类别着色」的颜色表（pyqtgraph 颜色）。
-# 中文标签文件里类别名是「人」「猫」—— 统一走 canonical_class_name
-# 归一化后查表，保证换标签文件颜色不漂移。
+# 深度分析「距离曲线」的着色（pyqtgraph 颜色）。
+# CHARTER v1.4：全链路唯一类别是「行人」，曲线只剩三种情形 ——
+# 有读数（人）、没有读数（未知）、以及不该出现的类别名。
+# 类别名统一走 canonical_class_name 归一化，保证换标签文件颜色不漂移。
 # ---------------------------------------------------------------------------
-_CLASS_PEN_COLORS = {
-    'person': 'g',              # 人：绿（与旧版距离曲线同色，观感延续）
-    'cat': (230, 126, 34),      # 猫：橙
-    'chair': (142, 124, 195),
-    'bicycle': (52, 152, 219),
-    'car': (231, 76, 60),
-}
-_CLASS_PEN_FALLBACK = ['y', 'c', 'm', (210, 180, 140), (128, 200, 160)]
+_PERSON_PEN_COLOR = 'g'                  # 人：绿（与旧版距离曲线同色，观感延续）
+_UNKNOWN_PEN_COLOR = (214, 40, 40)       # 「未知」固定红色（2026-09-26 用户定稿）：
+                                         # 距离曲线上**没有读数**的帧画成红色 0 线。
+                                         # 不用哈希兜底 —— str 哈希带进程随机盐，
+                                         # 颜色会一次运行一个样。
+_UNEXPECTED_PEN_COLOR = (130, 130, 130)  # 不该出现的类别名：只在「标签文件缺失」
+                                         # 的降级路径上可能冒出来，给中性灰，
+                                         # 以免与「无读数」的红混淆。
 
 
 def _class_pen_color(cls_name):
+    """距离曲线着色：单类别下只剩「人 / 未知」两种。"""
     canon = canonical_class_name(cls_name or '未知')
+    if canon == 'person':
+        return _PERSON_PEN_COLOR
     if canon == '未知':
-        # 「未知」固定红色（2026-09-26 用户定稿）：距离曲线上**没有读数**的帧
-        # （未检出 / 不可测）画成红色 0 线。不能走下面的 hash 兜底 ——
-        # str 哈希带进程随机盐，「未知」的颜色会一次运行一个样。
-        return (214, 40, 40)
-    if canon in _CLASS_PEN_COLORS:
-        return _CLASS_PEN_COLORS[canon]
-    return _CLASS_PEN_FALLBACK[hash(canon) % len(_CLASS_PEN_FALLBACK)]
+        return _UNKNOWN_PEN_COLOR
+    return _UNEXPECTED_PEN_COLOR
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +357,6 @@ class MainWindow(QWidget, Ui_Form):
         #推理结果
         self.lcd_credibility.display(self.global_params.credibility)
         self.label_target_category.setText(self.global_params.target_category)
-        self.update_specific_class_combo()
         #相机标定：先认「本机是哪台相机」，再按设备取内参（见 load_calibration）
         self.load_calibration()
         #安装参数（相机高度 + 俯仰角）：与内参同理，落盘后启动即回填
@@ -450,7 +448,6 @@ class MainWindow(QWidget, Ui_Form):
                     self.detector_thread.start()
                 # 标签与类别下拉跟着这次加载的模型走（不依赖用户手动选过标签）
                 self.labels = list(self.detector.labels or [])
-                self.update_specific_class_combo()
                 self._save_model_settings()   # 记住这次生效的组合
                 self.status_bar.showMessage('AI模型加载并初始化成功',3000)
             else:
@@ -525,8 +522,8 @@ class MainWindow(QWidget, Ui_Form):
             txt.setPos(vr[0][1], y)
         # 距离曲线（2026-09-26 用户定稿口径）：**未知也要画** ——
         # 没有读数的帧（未检出目标 / 检出但不可测）画进「未知」曲线：
-        # **红色、距离值拉到 0**，图例标「未知」；有读数的帧画进该类别的
-        # 曲线（颜色按类别，多个类别各自一条）。「未知与标签曲线不能同时
+        # **红色、距离值拉到 0**，图例标「未知」；有读数的帧画进「人」曲线
+        # （单类别后只剩「人 / 未知」两种颜色）。「未知与类别曲线不能同时
         # 出现」指**同一时刻**只有一条线，不是整张图只准存在一种。
         # 整条时间线**连续不断点**：换段处两段**共享边界点**（新段起笔自
         # 旧段末点、旧段收笔到新段首点）—— 类别线落下到 0、再从 0 回到
@@ -674,13 +671,12 @@ class MainWindow(QWidget, Ui_Form):
         # 安装参数自标定（监视页）：由「已知距离 + 框底边像素」反解 (H, 俯仰角)
         self.btn_mark_known.clicked.connect(self.on_mark_known_clicked)
         self.btn_solve_mount.clicked.connect(self.on_solve_mount_clicked)
-        # 检测配置（设置页）：选择规则 / 指定类别即时生效（2026-09-26 修复：
-        # 之前这两个下拉只在"应用"按钮里才写 global_params，而且检测器侧
-        # 被 detection_conf 误用整个短路，界面形同虚设）
+        # 检测配置（设置页）：选择规则即时生效（2026-09-26 修复：之前这个下拉
+        # 只在"应用"按钮里才写 global_params，而且检测器侧被 detection_conf
+        # 误用整个短路，界面形同虚设）。「指定类别」下拉已随类别收窄删除
+        # （CHARTER v1.4）。
         self.combo_target_select_rule.currentIndexChanged.connect(
             self.on_select_rule_changed)
-        self.combo_specific_class.currentIndexChanged.connect(
-            self.on_specific_class_changed)
 
         # 摄像头设备（设置页）：像蓝牙那样按设备记标定
         self.combo_camera_device.currentIndexChanged.connect(
@@ -2178,18 +2174,11 @@ class MainWindow(QWidget, Ui_Form):
             self.global_params.hardware_accel=self.combo_hardware_accel.currentText()
             self.global_params.mode_path=self.label_model_path.text()
             self.global_params.label_path=self.label_label_path.text()
-            self.global_params.specific_class = self.combo_specific_class.currentText()
             self.global_params.plot_enable=self.checkBox.isChecked()
 
             self.update_timer.setInterval(int(1000/self.global_params.sample_freq))
             self.async_init_ai_model(reload=True)#重新加载模型
 
-            if hasattr(self,'labels') and self.labels and len(self.labels)>0:#仅有标签时更新指定类别参数
-                self.global_params.specific_class_id=self.combo_specific_class.currentIndex()
-                self.global_params.specific_class=self.combo_specific_class.currentText()
-            else:
-                self.global_params.specific_class_id=-1
-                self.global_params.specific_class='无标签'
             # 测距配置跟着一起刷新（俯仰角可能也改过）
             self.ranger.update_config(RangingConfig.from_params(self.global_params))
             QTimer.singleShot(2000,self.finish_calibration)
@@ -2301,38 +2290,15 @@ class MainWindow(QWidget, Ui_Form):
                 print(f'加载标签失败：{str(e)}')
                 self.labels=[]
                 self.status_bar.showMessage(f'加载标签失败：{str(e)}', 5000)
-            self.update_specific_class_combo()
                 
     def on_select_rule_changed(self, index):
-        """选择规则下拉即时写入（0=最高置信度，1=指定类别）。"""
+        """选择规则下拉即时写入。类别收窄后只剩 0=最高置信度 一条规则。"""
         self.global_params.target_select_rule = index
 
-    def on_specific_class_changed(self, index):
-        """指定类别下拉即时写入。下拉按标签文件顺序填充，index 即 class_id。"""
-        self.global_params.specific_class_id = index
-        self.global_params.specific_class = self.combo_specific_class.currentText()
-
-    def update_specific_class_combo(self):
-        # 重填期间屏蔽信号：clear/addItems 会触发 currentIndexChanged，
-        # 产生 specific_class_id=-1/0 的瞬态误写；参数由本函数末尾统一落定
-        self.combo_specific_class.blockSignals(True)
-        try:
-            self.combo_specific_class.clear()#清空下拉框，确保状态统一
-            if hasattr(self, 'labels') and self.labels and len(self.labels)>0:
-                self.combo_specific_class.addItems(self.labels)
-                class_id=self.global_params.specific_class_id
-                if class_id is not None and 0 <= class_id < len(self.labels):
-                    self.combo_specific_class.setCurrentIndex(class_id)
-                else:
-                    self.global_params.specific_class_id=0
-                    self.combo_specific_class.setCurrentIndex(0)
-                    self.global_params.specific_class=self.labels[0]
-            else:
-                self.combo_specific_class.addItem('无标签')
-                self.global_params.specific_class_id=-1
-                self.global_params.specific_class='无标签'
-        finally:
-            self.combo_specific_class.blockSignals(False)
+    # 「指定类别」下拉及其槽函数（on_specific_class_changed /
+    # update_specific_class_combo）已随类别收窄删除（CHARTER v1.4：
+    # 全链路唯一类别是「行人」，该下拉没有可选项）。设置页这个位置留给
+    # 后续的「追踪目标选择」—— 见 CHARTER「范围内的」建档条。
 
             
     def on_detection_ready(self,target):#检测结果回调

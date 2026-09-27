@@ -1,18 +1,17 @@
-# 各目标类别的典型真实高度（米）。
+# 目标类别的典型真实高度（米）。
 #
 # 这是测距精度的**首要来源**：由 pinhole 模型 Z = fy * H / h 可知，
 # 距离与目标真实高度成正比 —— 高度估错 20%，距离就错 20%。
-# 因此这里只登记"高度稳定、可查证"的类别；查不到的走 default_object_height 兜底。
 #
-# ⚠️ 已知不适用于本表的情况：人弯腰/坐姿、车辆载重导致姿态变化、
-#    类别被误识别。这类误差只能靠双源互检（CHARTER 第 4 条）暴露，无法在表里消除。
+# CHARTER v1.4：全链路唯一类别是「行人」，本表因此只剩 person 一项。
+# default_object_height 只服务一条**如实降级路径** —— 标签文件缺失时
+# person 白名单建不起来（见 core/detector/yolo_detector._refresh_person_class_ids），
+# 非 person 的框会漏进来，此时才用到下面的兜底高度。
+#
+# ⚠️ 已知不适用于本表的情况：人弯腰/坐姿、类别被误识别。这类误差只能靠
+#    双源互检（CHARTER 第 4 条）暴露，无法在表里消除。
 _OBJECT_HEIGHTS_DEFAULT = {
     'person': 1.70,      # 成年人站姿中位偏上
-    'bicycle': 1.00,     # 含骑行者的整体高度下限
-    'car': 1.50,         # 轿车车顶高度
-    'motorcycle': 1.10,
-    'bus': 3.20,
-    'truck': 3.20,
 }
 
 
@@ -38,9 +37,10 @@ class GlobalParams:
         # 这是**检测器**的能力下限，不是测距算法的下限，不要试图往下救。
         self.confidence_thres=0.40
         self.nms_thres=0.45
+        # 目标选择规则：类别收窄后只剩 0=最高置信度 这一条
+        # （原 1=指定类别 已随多类别一并删除，见 core/detector/yolo_detector.select_target）。
+        # 这个位置留给 v1.4 的「追踪目标选择」（CHARTER「范围内的」建档条）。
         self.target_select_rule=0
-        self.specific_class='笔记本电脑'
-        self.specific_class_id=-1
         self.plot_enable=False
         #AI模型配置
         self.mode_path=''
@@ -61,7 +61,7 @@ class GlobalParams:
                                              # 此时地面接触点法不可用（CHARTER 第 2 条）
         self.height_tolerance=0.35           # 反解身高判据的容差：落在 ±35% 内视为合理
         self.object_heights=dict(_OBJECT_HEIGHTS_DEFAULT)
-        self.default_object_height=1.50
+        self.default_object_height=1.50     # 单类别后只在「标签文件缺失」的降级路径上用到
         self.min_pixel_height=8              # 像素高度下限，低于此值不测距
         # 宽度法（近场参考值，2026-09-25 P1+）：脚出画、左右未裁时的兜底测法
         # Z = fx * 肩宽 / 框宽。肩宽优先取人特征档案（person_profile.json）

@@ -86,16 +86,12 @@ class CameraIntrinsics:
 # 而这不是罕见配置：models/labels/ 下两种标签文件并存，UI 上随手一切就中招。
 #
 # 修法：所有「按类别名查表/比较」的入口统一先过 ``canonical_class_name``。
-# 只登记 object_heights / aspect_limits 里实际用到的类别（其余类别查表
-# 本来就走默认兜底，归不归一无差别）。TTC 走 class_id（整数），天然免疫。
+# CHARTER v1.4（全链路唯一类别是「行人」）之后，归一化表只需保留 person 的
+# 中英写法；其余类别名一律原样返回，落到下游兜底。TTC 走 class_id
+# （整数），天然免疫。
 CLASS_NAME_ALIASES = {
     # 中文 COCO 标签（coco_labels_cn.txt 实测用词） -> 规范英文名
     '人': 'person',
-    '自行车': 'bicycle',
-    '汽车': 'car',
-    '摩托车': 'motorcycle',
-    '公交车': 'bus',
-    '卡车': 'truck',
 }
 
 
@@ -119,22 +115,16 @@ class RangingConfig:
     """
 
     object_heights: dict = field(default_factory=lambda: {
-        # COCO 常见类别，单位：米。取该类别的中等偏上个体，偏保守。
+        # CHARTER v1.4：唯一类别是「行人」，单位米，取中等偏上个体，偏保守。
         'person': 1.70,
-        'bicycle': 1.00,
-        'car': 1.50,
-        'motorcycle': 1.10,
-        'bus': 3.20,
-        'truck': 3.20,
     })
-    default_height: float = 1.50   # 类别未登记时的兜底高度
+    default_height: float = 1.50   # 类别未登记时的兜底（只在标签缺失的降级路径上用到）
     pitch_deg: float = 0.0         # 相机俯仰角，向下为正，单位度
     camera_height: float = 0.0     # 相机安装高度（米），卷尺量。0 = 未测量，接触点法不可用
     min_pixel_height: int = 8      # 像素高度低于此值时不测距（噪声不可信）
     # 框宽高比先验 (下限, 上限)，用于判断「框底边是否真的是脚」。
-    # 只登记宽高比稳定的类别：站立的人约 0.30~0.45，只有脸入画时接近 1.0，
-    # 据此识别「框不是全身」。car / bus 的宽高比随视角变化极大
-    # （正面 1.5+、侧面 3+），套用会误判，故不登记。
+    # 站立的人约 0.30~0.45，只有脸入画时接近 1.0，据此识别「框不是全身」。
+    # （v1.4 类别收窄后，原先"不登记 car / bus"的理由随多类别一起消失。）
     # 上限 0.90（2026-09-26 实测修正）：0.75 会把**近场正常大框**整段误杀 ——
     # session-20260926-152834 里人走近后框 353x453~433x456（宽高比 0.76~0.95），
     # 这批帧脚未判出画（底缘欠检 26 px > 12 px 容差）走不了宽度法，又被

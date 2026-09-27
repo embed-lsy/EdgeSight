@@ -808,7 +808,6 @@ class Ui_Form(object):
 
         self.combo_target_select_rule = QComboBox(self.groupBox_12)
         self.combo_target_select_rule.addItem("")
-        self.combo_target_select_rule.addItem("")
         self.combo_target_select_rule.setObjectName(u"combo_target_select_rule")
         self.combo_target_select_rule.setMinimumSize(QSize(0, 50))
 
@@ -816,23 +815,6 @@ class Ui_Form(object):
 
 
         self.verticalLayout_22.addLayout(self.horizontalLayout_30)
-
-        self.horizontalLayout_28 = QHBoxLayout()
-        self.horizontalLayout_28.setObjectName(u"horizontalLayout_28")
-        self.label_38 = QLabel(self.groupBox_12)
-        self.label_38.setObjectName(u"label_38")
-        self.label_38.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.horizontalLayout_28.addWidget(self.label_38)
-
-        self.combo_specific_class = QComboBox(self.groupBox_12)
-        self.combo_specific_class.setObjectName(u"combo_specific_class")
-        self.combo_specific_class.setMinimumSize(QSize(0, 50))
-
-        self.horizontalLayout_28.addWidget(self.combo_specific_class)
-
-
-        self.verticalLayout_22.addLayout(self.horizontalLayout_28)
 
         self.horizontalLayout_24 = QHBoxLayout()
         self.horizontalLayout_24.setObjectName(u"horizontalLayout_24")
@@ -1266,9 +1248,7 @@ class Ui_Form(object):
         self.groupBox_12.setTitle(QCoreApplication.translate("Form", u"\u68c0\u6d4b\u914d\u7f6e", None))
         self.label_37.setText(QCoreApplication.translate("Form", u"\u76ee\u6807\u9009\u62e9\u89c4\u5219\uff1a", None))
         self.combo_target_select_rule.setItemText(0, QCoreApplication.translate("Form", u"\u6700\u9ad8\u7f6e\u4fe1\u5ea6", None))
-        self.combo_target_select_rule.setItemText(1, QCoreApplication.translate("Form", u"\u6307\u5b9a\u7c7b\u522b", None))
 
-        self.label_38.setText(QCoreApplication.translate("Form", u"\u6307\u5b9a\u7c7b\u522b\uff1a", None))
         self.label_29.setText(QCoreApplication.translate("Form", u"\u57fa\u51c6\u5bbd\u5ea6\uff1a", None))
         self.label_base_width.setText(QCoreApplication.translate("Form", u"30", None))
         self.groupBox_14.setTitle(QCoreApplication.translate("Form", u"\u6807\u5b9a\u4e0e\u7cfb\u7edf", None))
