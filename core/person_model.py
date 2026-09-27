@@ -22,6 +22,12 @@
 三个组件都是**纯逻辑**（不碰 Qt、不碰线程），与 ``core/calibration`` 同风格，
 可离线单测（``E:\\WorkBuddy-Work\\scripts\\verify_person_model.py``）。
 
+CHARTER v1.4 之后，档案还承担**身份**职责：「追踪目标选择」（设置页）
+从本模块的档案列表里**单选**一条作为唯一追踪目标（``is_track_target``），
+且名字可由用户改（``display_name``）。**档案仍是同一个文件**
+（``models/person_profile.json``，v2 结构），不另建平行档案库 —— 见
+CHARTER「范围内的」建档条：补 ``display_name`` / ``is_track_target`` / 来源标记。
+
 ⚠️ 精度声明：宽度法天生只有「参考级」（±15% 起步）。侧身时肩深 ~0.25 m
 （肩宽的 ~55%），会把距离**高估近一倍** —— 方向危险（以为远、实际近）。
 缓解：跟随场景几乎都是从背后跟（肩面朝相机），且结果恒标「参考」、
@@ -38,6 +44,15 @@ from typing import Optional
 
 import cv2
 import numpy as np
+
+# 嵌入相似度只是**点积**（纯数学）。借自 ``core.reid_osnet`` 是为了全项目只有
+# 一份实现。注意该模块顶层**不 import onnxruntime**（会话延迟到 ``load()`` 才建），
+# 所以本模块仍然是「纯逻辑、可离线单测」的 —— 这条 import 不会拉起重型依赖。
+from core.reid_cohort import (
+    COHORT_ADMIT_BELOW, COHORT_MAX_SIZE, COHORT_QUANTILE,
+    CohortPool, normalize_score,
+)
+from core.reid_osnet import embedding_similarity
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +121,9 @@ def appearance_similarity(a, b) -> float:
 # 人特征档案
 # ---------------------------------------------------------------------------
 
-PERSON_PROFILE_VERSION = 1
+# v3（2026-09-27）：档案新增 ``embedding`` / ``emb_model``（OSNet 外观嵌入）。
+# v1/v2 老档案读进来这两个字段为空 -> 匹配自动回落 HSV 直方图，不报错、不崩。
+PERSON_PROFILE_VERSION = 3
 
 # 采样合理性区间：身高/肩宽反解值落在外面说明这一帧有毛病（遮挡、非站姿、
 # 类别误识别），直接丢样本 —— 绝不把离群值往档案里记。
@@ -116,26 +133,74 @@ PLAUSIBLE_WIDTH_M = (0.15, 1.00)
 
 @dataclass
 class PersonProfile:
-    """一个人的可测特征：身高、肩宽、外观。
+    """一个人的可测特征：身高、肩宽、外观，以及它的**身份与登记信息**。
 
     「凭什么信这个数」：``n_updates`` 是提交进档案的**稳定窗口数**（每窗口
     ≥12 帧、CV≤5%），``updated_at`` 记最后一次提交时间 —— 排查时能回答
     「这个肩宽是什么时候、从多少帧里量出来的」。
+
+    身份字段（CHARTER v1.4「建档 + 追踪目标选择」）：
+    ``display_name`` 用户可改的名字（空 = 未命名，UI 回落到 ``profile_id``）；
+    ``is_track_target`` 是否被指定为**唯一**追踪目标（单选，全库最多一条为真）；
+    ``enroll_source`` / ``enrolled_at`` 区分「用户主动建档」与「追踪时被动
+    自动建档」—— 这两种来源必须能分开：前者才是 CHARTER 说的「事先登记」，
+    后者只是「这个人出现过」的证据，认人可信度不同。
     """
 
     profile_id: str = 'person-1'
+    display_name: str = ''       # 用户可改的名字；'' = 未命名，显示时回落 profile_id
+    is_track_target: bool = False  # 唯一追踪目标标记（单选）
     height_m: float = 0.0        # 真实身高（米），接触点法距离 × 框高px / fy
     width_m: float = 0.0         # 真实肩宽（米），接触点法距离 × 框宽px / fy
-    appearance: list = field(default_factory=list)   # 512 维直方图（JSON 可存）
+    appearance: list = field(default_factory=list)   # 512 维 HSV 直方图（JSON 可存）
+    embedding: list = field(default_factory=list)    # 512 维 OSNet 嵌入（L2 归一）
     n_updates: int = 0           # 提交次数（每次一个稳定窗口）
     updated_at: str = ''
     source: str = ''             # 样板来源说明（首次创建时记）
+    enrolled_at: str = ''        # 主动建档时间；'' = 尚未主动登记
+    enroll_source: str = 'auto'  # 'manual' 用户建档 / 'auto' 被动自动建档
+    emb_model: str = ''          # embedding 出自哪个模型；换模型后旧嵌入不可比
 
     def similarity(self, hist) -> float:
+        """与 **HSV 直方图**（``appearance`` 字段）的相似度，∈ [0, 1]。
+
+        ⚠️ **只接受 HSV 直方图**。要比 OSNet 嵌入请用 ``embedding_similarity()``：
+        两者**都是 512 维、都被归一化到 norm=1**，传错**既不抛异常、数值也不显异常**
+        —— 只会静默得到无意义的数。字段是分开的（``appearance`` / ``embedding``），
+        别手动把嵌入塞进 ``appearance``。
+        """
         if not self.appearance or hist is None:
             return 0.0
         return appearance_similarity(np.asarray(self.appearance, dtype=np.float64),
                                      np.asarray(hist, dtype=np.float64))
+
+    def embedding_similarity(self, emb) -> float:
+        """与 **OSNet 嵌入**（``embedding`` 字段）的余弦相似度，∈ [-1, 1]。
+
+        ⚠️ **判别力相对 ``similarity()`` 强多少，至今没有可信数字。**
+        曾经写在这里的「实测 6.4 倍（+0.090 vs +0.014）」**已撤回** ——
+        那个探针脚本（``probe_osnet_reid.py``）两侧量到的都是**同一个人**的
+        样本，得到的是「同一人跨时间/光照/衣着的**稳定性**」，
+        **不是「不同人之间的可分性」**。真实异人分布至今没有数据
+        （历史 17 段录制里只有一个人，见 ``contact_sheet.png``）。
+        能说的只有：两者都远谈不上可依赖，而 OSNet 至少在同人回访上分得开。
+
+        档案里没有嵌入（v1/v2 老档案）时返回 ``0.0``，调用方据此回落 HSV 路子。
+        """
+        if not self.embedding or emb is None:
+            return 0.0
+        return embedding_similarity(np.asarray(self.embedding, dtype=np.float32),
+                                    np.asarray(emb, dtype=np.float32))
+
+    @property
+    def name(self) -> str:
+        """显示用名字：用户改过就用改过的，没改过就用 profile_id。"""
+        return self.display_name or self.profile_id
+
+    @property
+    def is_enrolled(self) -> bool:
+        """是否是「事先登记」的档案（区别于追踪时被动自动建档）。"""
+        return self.enroll_source == 'manual'
 
 
 class PersonFeatureTracker:
@@ -147,10 +212,18 @@ class PersonFeatureTracker:
                         capture_ok=…, distance_m=…, fx=…, fy=…)
 
     1. 算外观直方图 -> 与已有档案匹配 -> 决定「当前是哪个人」（active）；
-    2. ``capture_ok``（目标完整 + 接触点法可信，由调用方按可见性体检决定）
+    2. **仅在主动建档会话中**（调用过 ``begin_enrollment()`` 之后）：
+       ``capture_ok``（目标完整 + 接触点法可信，由调用方按可见性体检决定）
        时把 (身高, 肩宽, 外观) 存进滚动缓冲；
-    3. 缓冲里攒够一个**静止稳定**的窗口（≥12 帧、身高 CV ≤5%）就提交 ——
-       匹配上的人用 EMA 更新，匹配不上就新建档案（上限 5 个，挤掉最旧的）。
+    3. 同样仅在建档会话中，缓冲里攒够一个**静止稳定**的窗口（≥12 帧、
+       身高 CV ≤5%）才提交 —— 匹配上的人用 EMA 更新，匹配不上就新建档案。
+
+    ⚠️ **被动路径不建档**（2026-09-27 改正，对 CHARTER v1.4「建档」条）：
+    原先任何人只要在画面里站定约 1 秒就会被**自动**记入档案 —— 那是 2026-09-25
+    为「宽度法需要一个肩宽」顺手加的机制，与 v1.4「建档是用户主动走的独立第三步
+    （Q1=A 事先登记）」**方向相反**：它会把路过的人写进库、还会挤掉真正登记的目标，
+    而用户从未要求过。现在：**没调用 ``begin_enrollment()`` 就只认人、不采样、
+    不落盘**，档案只能由主动建档产生。
 
     为什么「稳定窗口」而不是逐帧 EMA：人在走动时框宽/框高本来就会抖，
     逐帧更新会把走姿的抖动永远洗进档案里。窗口 + CV 门槛等价于
@@ -163,21 +236,75 @@ class PersonFeatureTracker:
     def __init__(self, json_path: str, *,
                  max_profiles: int = 5,
                  match_threshold: float = 0.55,
+                 emb_match_threshold: float = 0.50,
+                 emb_tag: str = '',
                  commit_min_samples: int = 12,
                  window_s: float = 3.0,
                  height_cv_max: float = 0.05,
-                 ema_alpha: float = 0.30):
+                 ema_alpha: float = 0.30,
+                 cohort_enabled: bool = False,
+                 cohort_admit_below: float = COHORT_ADMIT_BELOW,
+                 cohort_quantile: float = COHORT_QUANTILE,
+                 cohort_max_size: int = COHORT_MAX_SIZE):
+        """
+        match_threshold
+            **HSV 直方图**路子的阈值（L1 相似度）。沿用旧值 0.55。
+        emb_match_threshold
+            **OSNet 嵌入**路子的阈值（余弦）。⚠️ 这是**占位值，不是校准值**：
+            取 0.50 的锚点是「同一人跨会话实测中位 0.502」（``probe_osnet_reid.py``）；
+            取略低是为了先保证「认得出自己」。**异人分布当前无数据**
+            （录制里只有一个人，缺负样本），所以偏松或偏紧都无法证伪。
+            待含第二位真人的录制到手后重新标定 —— 在那之前 UI 会同时显示
+            实际分数，让「认不出」和「门槛定错」能被人看出来。
+        emb_tag
+            嵌入来源标记（建议用模型文件名）。档案里记它、匹配时比它 ——
+            换模型后旧嵌入与新嵌入不同源，必须拒绝比较而不是算个数出来。
+        cohort_enabled
+            **路人池归一化开关，默认关**（``core/reid_cohort.py``）。开启后，
+            匹配分数会减去「本场景里路人最多能像到什么程度」再与门槛比，
+            让门槛跨场景可比。**默认关的理由是实测判决、不是保守**：
+            用 17 段历史回放（2054 条嵌入、全部同一人）做留一交叉验证测得
+            —— 画面里只有目标一人时，池**恒为空**（准入门槛 0.30 下 32864
+            帧仅 2 帧入池且不足 3 条），归一化从不生效；而门槛一旦放松到
+            0.35，池立刻被**本人帧**填满，本人通过率从 59.8% 崩到 1.3%。
+            也就是说：**在"只有目标一人"的场景里它无收益，且门槛稍松即有害**。
+            它的收益完全依赖「场景里真会出现路人」这个尚未发生过的前提。
+            脚本：``cohort_real_probe.py``（判决）、``verify_cohort_norm.py``（单测）。
+
+            ⚠️ **开启后门槛含义会变，且当前阈值未按新口径重标定**：判定用的是
+            ``raw − offset``，而 ``emb_match_threshold``（0.50）是**原始口径**
+            定的 —— 等价于把实际门槛抬到 ``0.50 + offset``。实测本人帧的
+            offset 约 0.09，即实际门槛约 0.59，**判定只会更严、不会更松**。
+            要正确使用，阈值必须用**含路人**的录制在归一化口径下重新校准；
+            在那之前 ``match_line()`` 会把「门槛为原始口径，未按偏移重标定」
+            写在分数后面，免得「原始 0.58 过了 0.50 却判不通过」被当成 bug 查。
+        cohort_admit_below / cohort_quantile / cohort_max_size
+            路人池参数，见 ``core/reid_cohort.py``。
+        """
         self.json_path = json_path
         self.max_profiles = max_profiles
         self.match_threshold = match_threshold
+        self.emb_match_threshold = emb_match_threshold
+        self.emb_tag = emb_tag
         self.commit_min_samples = commit_min_samples
         self.window_s = window_s
         self.height_cv_max = height_cv_max
         self.ema_alpha = ema_alpha
 
+        # 路人池（cohort 归一化）。**无论开关是否打开都建对象** —— 它是一个
+        # 空 deque，代价可忽略；这样开关可以运行期翻转，不必重建 tracker。
+        self.cohort_enabled = bool(cohort_enabled)
+        self._cohort = CohortPool(max_size=cohort_max_size,
+                                  admit_below=cohort_admit_below,
+                                  quantile=cohort_quantile,
+                                  model_tag=self.emb_tag)
+
         self.profiles: list[PersonProfile] = []
         self.active: Optional[PersonProfile] = None
-        self._samples: list[dict] = []      # {t, h, w, hist}
+        self._samples: list[dict] = []      # {t, h, w, hist, emb}
+        self._enrolling = False             # 是否处于「主动建档会话」中
+        self._last_match: dict = {}         # 最近一次匹配的路线/分数/门槛
+        self._commits = 0                   # 累计提交次数（UI 据此播报提示音）
         self._dirty = False
         self.load()
 
@@ -194,14 +321,30 @@ class PersonFeatureTracker:
             for p in data.get('profiles', []):
                 profiles.append(PersonProfile(
                     profile_id=str(p.get('profile_id', '')),
+                    display_name=str(p.get('display_name', '') or ''),
+                    is_track_target=bool(p.get('is_track_target', False)),
                     height_m=float(p.get('height_m', 0.0)),
                     width_m=float(p.get('width_m', 0.0)),
                     appearance=list(p.get('appearance', [])),
+                    # v3 之前的老档案没有嵌入 -> 空列表，匹配自动回落 HSV
+                    embedding=list(p.get('embedding', []) or []),
                     n_updates=int(p.get('n_updates', 0)),
                     updated_at=str(p.get('updated_at', '')),
                     source=str(p.get('source', '')),
+                    enrolled_at=str(p.get('enrolled_at', '')),
+                    # v1 老档案没有字段 -> 它们都是追踪时被动建档的
+                    enroll_source=str(p.get('enroll_source', 'auto') or 'auto'),
+                    emb_model=str(p.get('emb_model', '') or ''),
                 ))
             self.profiles = profiles
+            # 唯一性自愈：文件被手改/合并过可能出现多条 is_track_target，
+            # 只保留第一条（否则「追踪目标选择」的语义就破了）。
+            seen = False
+            for p in self.profiles:
+                if p.is_track_target:
+                    if seen:
+                        p.is_track_target = False
+                    seen = True
         except (json.JSONDecodeError, OSError, ValueError, TypeError):
             self.profiles = []
 
@@ -217,23 +360,77 @@ class PersonFeatureTracker:
             json.dump(payload, f, ensure_ascii=False, indent=1)
         self._dirty = False
 
+    # -- 主动建档会话（CHARTER v1.4「建档」） ------------------------------
+
+    def begin_enrollment(self) -> None:
+        """开启**主动建档会话**：此后 ``observe()`` 才开始采样、攒窗口、落盘。
+
+        重复调用幂等（已在会话中就不清空已采样本，避免误操作把进度扔掉）。
+        """
+        if not self._enrolling:
+            self._enrolling = True
+            self._samples = []
+
+    def end_enrollment(self) -> None:
+        """结束建档会话：停止采样。未成窗口的样本一并作废。"""
+        self._enrolling = False
+        self._samples = []
+
+    @property
+    def enrolling(self) -> bool:
+        """是否正在主动建档会话中（界面据此显示"正在建档"状态）。"""
+        return self._enrolling
+
+    def enroll_progress(self) -> dict:
+        """建档进度快照，供 UI 显示大字状态与匹配分数。**不表达判定**。
+
+        ``samples``/``required`` 是「已采帧数 / 提交门槛」；
+        ``active_name`` 为空表示本帧没匹配上任何人；
+        ``match_*`` 是最近一次匹配走的哪条路、分数多少、门槛多少、有几条可比档案
+        —— 阈值未校准期间，这是判断「认不出」还是「门槛定错」的唯一依据。
+        """
+        m = self._last_match or {}
+        return {
+            'enrolling': self._enrolling,
+            'commits': self._commits,
+            'samples': len(self._samples),
+            'required': self.commit_min_samples,
+            'profiles': len(self.profiles),
+            'active_name': self.active.name if self.active is not None else '',
+            'match_source': str(m.get('source', '')),
+            'match_score': float(m.get('score', 0.0)),
+            'match_threshold': float(m.get('threshold', 0.0)),
+            'match_comparable': int(m.get('comparable', 0)),
+        }
+
     # -- 每帧入口 ----------------------------------------------------------
 
     def observe(self, box: dict, frame_rgb, now: float, *,
                 capture_ok: bool, distance_m: Optional[float],
-                fx: float, fy: float) -> None:
+                fx: float, fy: float, embedding=None) -> None:
         """每帧调用（有 person 检测时）。
 
         参数
         ----
-        capture_ok : 本帧是否满足采样条件（完整可见 + 接触点法可信 + 静止）。
+        capture_ok : 本帧是否满足采样条件（完整可见 + 距离可信 + 静止）。
                      调用方按可见性体检与 RangingResult 决定，这里不重复判断
                      —— 判据与测距同源，避免两处各写一套。
-        distance_m : 接触点法解出的距离（capture_ok=True 时必须非 None）。
+        distance_m : 实际用于反解的真实距离（米）。可以是接触点法解出的，
+                     也可以是用户在设置页手填的采样点距离（调用方决定用哪个）。
+                     ``capture_ok=True`` 时必须非 None。
+        embedding  : 本帧该人的 OSNet 嵌入（512 维、L2 归一），没有就传 ``None``。
+                     **由调用方提取**：本模块刻意不 import onnxruntime，
+                     保持纯逻辑、可离线单测。传了它，匹配就走嵌入路子。
         """
         hist = torso_appearance(frame_rgb, box)
-        if hist is not None:
-            self._match_active(hist)
+        if hist is not None or embedding is not None:
+            self._match_active(hist, embedding)
+            self._feed_cohort(embedding)
+
+        # 被动路径到此为止：只认人（更新 active），不采样、不落盘。
+        # 建档必须由主动会话开启 —— 见类 docstring 的 ⚠️ 说明。
+        if not self._enrolling:
+            return
 
         if not capture_ok or distance_m is None or distance_m <= 0:
             return
@@ -251,7 +448,8 @@ class PersonFeatureTracker:
         if not (PLAUSIBLE_WIDTH_M[0] <= w_m <= PLAUSIBLE_WIDTH_M[1]):
             return
 
-        self._samples.append({'t': now, 'h': h_m, 'w': w_m, 'hist': hist})
+        self._samples.append({'t': now, 'h': h_m, 'w': w_m,
+                              'hist': hist, 'emb': embedding})
         self._trim(now)
         self._try_commit()
 
@@ -276,6 +474,17 @@ class PersonFeatureTracker:
             s = hist_new.sum()
             hist_new = hist_new / s if s > 0 else None
 
+        # 嵌入同理取窗口内平均。平均向量**必须重新 L2 归一化** ——
+        # 余弦相似度的前提是两侧都已归一化，省掉这一步会让分数整体偏小、
+        # 阈值随之失准（而且不报错）。
+        embs = [s['emb'] for s in self._samples if s.get('emb') is not None]
+        emb_new = None
+        if embs:
+            m = np.mean(np.stack([np.asarray(e, dtype=np.float32) for e in embs]), axis=0)
+            norm = float(np.linalg.norm(m))
+            if norm > 1e-12:
+                emb_new = m / norm
+
         a = self.ema_alpha
         now_str = time.strftime('%Y-%m-%d %H:%M:%S')
         if self.active is not None:
@@ -292,6 +501,16 @@ class PersonFeatureTracker:
                     p.appearance = merged.tolist()
                 else:
                     p.appearance = hist_new.tolist()
+            if emb_new is not None:
+                if p.embedding:
+                    old_e = np.asarray(p.embedding, dtype=np.float32)
+                    merged_e = (1 - a) * old_e + a * emb_new
+                    norm = float(np.linalg.norm(merged_e))
+                    p.embedding = ((merged_e / norm) if norm > 1e-12
+                                   else merged_e).tolist()
+                else:
+                    p.embedding = emb_new.tolist()
+                p.emb_model = self.emb_tag
             p.n_updates += 1
             p.updated_at = now_str
         else:
@@ -302,33 +521,171 @@ class PersonFeatureTracker:
                 if self.active is victim:
                     self.active = None
             pid = f'person-{len(self.profiles) + 1}-{int(time.time())}'
+            note = f'主动建档：{len(self._samples)} 帧稳定窗口'
+            if emb_new is None:
+                # 嵌入取不到（模型缺失/框太小）不该让建档失败 —— 几何特征
+                # 本身就够近场宽度法用，只是匹配能力退回 HSV 那一路。
+                note += '（无嵌入，仅几何 + 直方图）'
             p = PersonProfile(profile_id=pid, height_m=h_new, width_m=w_new,
                               appearance=hist_new.tolist() if hist_new is not None else [],
+                              embedding=emb_new.tolist() if emb_new is not None else [],
                               n_updates=1, updated_at=now_str,
-                              source=f'{len(self._samples)} 帧稳定窗口自动提交')
+                              source=note,
+                              enroll_source='manual',
+                              enrolled_at=now_str,
+                              emb_model=self.emb_tag if emb_new is not None else '')
             self.profiles.append(p)
             self.active = p
         self._samples = []
         self._dirty = True
         self.save()
+        # 提交次数只增不减、跨会话累计。UI 记住上次的值，变大才播报一次
+        # —— 这样「提示音」不会随刷新重复响，也不需要额外的状态通道。
+        self._commits += 1
 
-    def _match_active(self, hist) -> None:
-        """用外观直方图决定「现在画面里的人是档案里的谁」。
+    def _match_active(self, hist, embedding=None) -> None:
+        """决定「现在画面里的人是档案里的谁」。
+
+        **优先用 OSNet 嵌入**（判别力**未经异人样本验证**，见
+        ``PersonProfile.embedding_similarity`` 的 ⚠️）；嵌入不可用时**回落**
+        HSV 直方图 —— 回落不是"降级凑合"，而是保证「模型缺失时行为仍可解释」。
 
         匹配不上必须**清空 active**：画面里可能是没建档的新人。若不清空，
         下一次稳定窗口提交会把新人的身高/肩宽 EMA 进旧人的档案
         （宽度法从此用错肩宽），这是 verify_person_model C2 抓出的真 bug。
         宽度法随之回退默认肩宽，等新人自己的档案建立后自动恢复。
+
+        每次匹配都把「用了哪条路、分数多少、门槛多少、有几条可比档案」记进
+        ``self._last_match`` —— 阈值未校准期间，这是唯一能让人判断
+        「到底是认不出，还是门槛定错了」的依据（UI 会显示它）。
         """
+        if embedding is not None:
+            best, best_sim, comparable = None, 0.0, 0
+            for p in self.profiles:
+                # 跨模型不可比：换过嵌入模型后，旧档案里的向量与当前向量不同源，
+                # 余弦值毫无意义且**不会报错** —— 直接跳过，比出个数更危险。
+                if not p.embedding or p.emb_model != self.emb_tag:
+                    continue
+                comparable += 1
+                sim = p.embedding_similarity(embedding)
+                if sim > best_sim:
+                    best, best_sim = p, sim
+            # ⚠️ 没有可比档案时 raw 必须是 ``None``，**不能是 0.0**：
+            # 0.0 在路人池里是"远不像目标"，会被准入（0.0 < admit_below），
+            # 于是**还没建档时期的目标本人**被收进池，之后拿他自己的分数
+            # 减他自己。这是接线层特有的陷阱 —— reid_cohort 内部的准入防护
+            # 只认 ``None``（它无从知道"0.0 是因为无从判断还是真的不像"）。
+            raw = best_sim if comparable > 0 else None
+            offset = None
+            if self.cohort_enabled and raw is not None:
+                offset = self._cohort.offset(embedding)
+            if raw is None:
+                score = 0.0
+            elif offset is not None:
+                score = normalize_score(raw, offset)
+            else:
+                score = raw
+            self.active = (best if (best is not None
+                                    and score >= self.emb_match_threshold)
+                           else None)
+            self._last_match = {
+                'source': 'embedding', 'score': round(score, 4),
+                'raw': (round(raw, 4) if raw is not None else None),
+                'offset': (round(offset, 4) if offset is not None else None),
+                'cohort_enabled': self.cohort_enabled,
+                'cohort_size': len(self._cohort),
+                'threshold': self.emb_match_threshold,
+                'comparable': comparable,
+            }
+            return
+
         best, best_sim = None, 0.0
         for p in self.profiles:
             sim = p.similarity(hist)
             if sim > best_sim:
                 best, best_sim = p, sim
-        if best is not None and best_sim >= self.match_threshold:
-            self.active = best
+        self.active = (best if (best is not None
+                                and best_sim >= self.match_threshold) else None)
+        self._last_match = {
+            'source': 'hist', 'score': round(best_sim, 4),
+            'threshold': self.match_threshold,
+            'comparable': sum(1 for p in self.profiles if p.appearance),
+        }
+
+    def _feed_cohort(self, embedding) -> None:
+        """把本帧嵌入喂给路人池。**必须在 ``_match_active`` 之后调用** ——
+        准入要用的 ``raw`` 是刚算出来的「与档案库最高相似度」。
+
+        三条早退，每条都有实际理由：
+        - 开关关（默认）：零开销，不产生任何池状态；
+        - 没有嵌入：池的统计量只对嵌入路子有意义，HSV 那路的分数不可比；
+        - ``raw is None``（库为空 / 无可比档案）：**无法判断**这一帧像不像
+          目标，此时入池会把目标本人收进来（见 ``_match_active`` 的 ⚠️）。
+        """
+        if not self.cohort_enabled or embedding is None:
+            return
+        raw = self._last_match.get('raw')
+        if raw is None:
+            return
+        self._cohort.observe(embedding, raw, model_tag=self.emb_tag)
+
+    # -- 追踪目标（CHARTER v1.4「建档 + 追踪目标选择」，单选）----------------
+
+    def track_target(self) -> Optional[PersonProfile]:
+        """当前被指定的追踪目标。全库最多一条；没指定返回 ``None``。"""
+        for p in self.profiles:
+            if p.is_track_target:
+                return p
+        return None
+
+    def set_track_target(self, profile_id: str) -> Optional[PersonProfile]:
+        """把追踪目标切换为 ``profile_id``（**单选**：其余一律清零），并落盘。
+
+        传空串 = 取消指定。``profile_id`` 不在库里时**什么都不改并返回 None**
+        —— 宁可不动作，也不留下两条 ``is_track_target``（那会让「追谁」变成
+        不确定，与 CHARTER 的「行为确定性」相悖）。
+        """
+        hit = None
+        if profile_id:
+            for p in self.profiles:
+                if p.profile_id == profile_id:
+                    hit = p
+                    break
+            if hit is None:
+                return None
+        for p in self.profiles:
+            p.is_track_target = (p is hit)
+        self._dirty = True
+        self.save()
+        return hit
+
+    def rename_profile(self, profile_id: str, new_name: str) -> bool:
+        """改指纹的显示名（用户可改）。去首尾空白；全空白 = 清回未命名。落盘。"""
+        for p in self.profiles:
+            if p.profile_id == profile_id:
+                p.display_name = (new_name or '').strip()
+                self._dirty = True
+                self.save()
+                return True
+        return False
+
+    def profile_label(self, p: PersonProfile) -> str:
+        """下拉框里的一行文字。来源标记放在这里 —— 用户要能一眼看出
+        「这条是事先登记的」还是「追踪时被动攒出来的」，两者可信度不同。"""
+        origin = '已建档' if p.is_enrolled else '自动'
+        return f'{p.name}（{origin}）'
+
+    def profile_tooltip(self, p: PersonProfile) -> str:
+        """悬停说明：把「凭什么信这条档案」讲清楚。"""
+        upd = p.updated_at or '—'
+        n = f'{p.n_updates} 个稳定窗口' if p.n_updates else '尚未量到稳定值'
+        if p.is_enrolled:
+            origin = f'事先建档于 {p.enrolled_at or "—"}'
         else:
-            self.active = None
+            origin = f'追踪时自动建档（{p.source or "—"}）'
+        return (f'{p.name}\n档案 ID：{p.profile_id}\n{origin}\n'
+                f'身高 {p.height_m:.2f} m ／肩宽 {p.width_m:.2f} m\n'
+                f'样本：{n}，最近更新 {upd}')
 
     # -- 查询 --------------------------------------------------------------
 
@@ -338,16 +695,90 @@ class PersonFeatureTracker:
             return float(self.active.width_m)
         return default
 
+    def ranging_width_m(self, default: float) -> float:
+        """**测距实际取用**的肩宽（CHARTER v1.4「追踪目标选择」的生效点）。
+
+        指定了追踪目标 -> **恒用该目标档案里的肩宽**。这正是建档的意义：
+        用「这个人自己的肩宽」去测，而不是猜 0.46 m、也不是用画面里恰好
+        匹配上的别人 —— 后者会让近场读数随路人漂移。
+
+        未指定追踪目标 -> 沿用旧行为（本帧外观匹配到的那个人的肩宽，
+        否则 ``default``），保证「没选目标」时行为与改造前完全一致。
+
+        ⚠️ 职责边界：本函数只管**取谁的肩宽**。当前帧里的目标是不是追踪
+        目标本人、该不该出数，属**匹配分级**（CHARTER「范围内的」第 4 条）
+        的判定，由上层负责，不在这里拦。
+        """
+        target = self.track_target()
+        if target is not None and target.width_m > 0:
+            return float(target.width_m)
+        return self.current_width_m(default)
+
     def current_summary(self) -> str:
         """给状态栏/UI 的一句话总结（有没有量到人、量到了什么）。"""
+        target = self.track_target()
+        if target is not None:
+            if self.active is target:
+                return (f'追踪目标：{target.name}（本帧已认出）身高 '
+                        f'{target.height_m:.2f} m / 肩宽 {target.width_m:.2f} m')
+            if self.active is not None:
+                return (f'追踪目标：{target.name}（本帧未认出，画面里是'
+                        f'{self.active.name}）')
+            return f'追踪目标：{target.name}（本帧未匹配到）'
         if self.active is None:
             if self._samples:
                 return (f'正在建档（{len(self._samples)}/'
                         f'{self.commit_min_samples} 帧）……让目标完整入画并站定')
-            return '人员特征：暂无档案（让目标完整入画站定约 1 秒即可建档）'
+            return ('人员特征：暂无档案 —— 到设置页走「建档」第三步'
+                    '（本程序不会自动建档）')
         p = self.active
-        return (f'人员特征：{p.profile_id} 身高 {p.height_m:.2f} m / '
-                f'肩宽 {p.width_m:.2f} m（{p.n_updates} 次窗口更新）')
+        return (f'人员特征：{p.name} 身高 {p.height_m:.2f} m / '
+                f'肩宽 {p.width_m:.2f} m（{p.n_updates} 次窗口更新）'
+                f'｜未指定追踪目标')
+
+    def match_line(self) -> str:
+        """最近一次匹配的一行说明（路线 + 分数 + 门槛 + 可比档案数 + 路人池）。
+
+        **阈值未校准期间这是必需的**：只报「未认出」会让人以为是特征不行，
+        把分数和门槛一起摆出来，才能分辨「分数低」还是「门槛定错」。
+
+        开了路人池归一化时，**原始分数与偏移量都要摆出来** —— 归一化生效会
+        让显示的分数不再等于「嵌入本身的相似度」，只报一个数就分不清
+        「像得不够」还是「被池吃掉了」。
+        """
+        m = self._last_match or {}
+        if not m:
+            return '匹配：本帧未计算'
+        src = '嵌入(余弦)' if m.get('source') == 'embedding' else '直方图(L1)'
+        if int(m.get('comparable', 0)) == 0:
+            return f'匹配：{src} —— 库里 {len(self.profiles)} 条档案，无一条可比'
+        line = (f'匹配：{src} {m.get("score", 0.0):.3f} / 门槛 '
+                f'{m.get("threshold", 0.0):.3f}（可比档案 '
+                f'{m.get("comparable", 0)} 条）')
+        if m.get('cohort_enabled'):
+            off = m.get('offset')
+            size = int(m.get('cohort_size', 0))
+            if off is None:
+                line += f'｜路人池 {size} 条未够，未归一化'
+            else:
+                raw = m.get('raw')
+                tail = f'｜路人池 {size} 条 偏移 {off:.3f}'
+                if raw is not None:
+                    tail += f'（原始 {raw:.3f}）'
+                # ⚠️ 归一化生效后判定口径变了：门槛仍是**原始口径**的 0.50，
+                # 拿归一化分数去比它，等价于把实际门槛抬到 0.50+偏移。
+                # 这必须明说 —— 否则「原始 0.58 明明过了 0.50 却判不通过」
+                # 会被当成 bug 去查。
+                tail += '｜门槛为原始口径，未按偏移重标定'
+                line += tail
+        return line
+
+    def cohort_line(self) -> str:
+        """路人池状态一行（给 UI 常显）。关的时候**明确说关**，不留空白 ——
+        否则「没显示」会被读成「池是空的」。"""
+        if not self.cohort_enabled:
+            return '路人池：未启用（cohort 归一化默认关）'
+        return self._cohort.line()
 
 
 # ---------------------------------------------------------------------------

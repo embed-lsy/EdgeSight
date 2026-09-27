@@ -4,9 +4,12 @@
 # 距离与目标真实高度成正比 —— 高度估错 20%，距离就错 20%。
 #
 # CHARTER v1.4：全链路唯一类别是「行人」，本表因此只剩 person 一项。
-# default_object_height 只服务一条**如实降级路径** —— 标签文件缺失时
-# person 白名单建不起来（见 core/detector/yolo_detector._refresh_person_class_ids），
-# 非 person 的框会漏进来，此时才用到下面的兜底高度。
+#
+# **表外类别一律拒绝出距离**（2026-09-27 用户明确要求）。原先有一条
+# 「标签文件缺失时用 default_object_height 兜底」的降级路径，现已删除：
+# 表外类别可能不是人（定位外目标），也可能是标签没加载导致类别未知 ——
+# 两种情形都拿不到「这个目标真实有多高」，给数字就是编数。
+# 标签缺失时正确行为是**如实报不可测**并提示去设置页检查标签文件。
 #
 # ⚠️ 已知不适用于本表的情况：人弯腰/坐姿、类别被误识别。这类误差只能靠
 #    双源互检（CHARTER 第 4 条）暴露，无法在表里消除。
@@ -37,10 +40,11 @@ class GlobalParams:
         # 这是**检测器**的能力下限，不是测距算法的下限，不要试图往下救。
         self.confidence_thres=0.40
         self.nms_thres=0.45
-        # 目标选择规则：类别收窄后只剩 0=最高置信度 这一条
-        # （原 1=指定类别 已随多类别一并删除，见 core/detector/yolo_detector.select_target）。
-        # 这个位置留给 v1.4 的「追踪目标选择」（CHARTER「范围内的」建档条）。
-        self.target_select_rule=0
+        # 追踪目标选择（CHARTER v1.4「建档 + 追踪目标选择」）：设置页**单选**
+        # 一条指纹档案作为唯一追踪目标，这里存它的 profile_id；'' = 未指定。
+        # 原先的「目标选择规则」（0=最高置信度 / 1=指定类别）已随类别收窄删除：
+        # 单类别下规则只剩一条，检测器侧 select_target 现在恒取最高置信度。
+        self.track_target_id=''
         self.plot_enable=False
         #AI模型配置
         self.mode_path=''
@@ -61,11 +65,17 @@ class GlobalParams:
                                              # 此时地面接触点法不可用（CHARTER 第 2 条）
         self.height_tolerance=0.35           # 反解身高判据的容差：落在 ±35% 内视为合理
         self.object_heights=dict(_OBJECT_HEIGHTS_DEFAULT)
-        self.default_object_height=1.50     # 单类别后只在「标签文件缺失」的降级路径上用到
         self.min_pixel_height=8              # 像素高度下限，低于此值不测距
         # 宽度法（近场参考值，2026-09-25 P1+）：脚出画、左右未裁时的兜底测法
         # Z = fx * 肩宽 / 框宽。肩宽优先取人特征档案（person_profile.json）
         # 里给当前目标量出的值；没有档案时用这个默认值。
         self.person_width_m=0.46
         self.person_profile_path='models/person_profile.json'
+        # OSNet 外观嵌入的匹配阈值（余弦）。⚠️ **占位值，不是校准值**：
+        # 取 0.50 的锚点是「同一人跨会话实测中位 0.502」（probe_osnet_reid.py）；
+        # 取略低是为了先保证「认得出自己」。**异人分布当前无数据**
+        # （既有录制里只有一个人，缺负样本），所以偏松偏紧都无法证伪。
+        # 待含第二位真人的录制到手后重新标定 —— 在那之前 UI 会同时显示
+        # 实际分数与门槛，让「认不出」和「门槛定错」能被分辨。
+        self.reid_match_threshold=0.50
         self.distance=0.0                    # 当前目标解算距离（米），None 表示不可解算

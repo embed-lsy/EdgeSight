@@ -118,7 +118,6 @@ class RangingConfig:
         # CHARTER v1.4：唯一类别是「行人」，单位米，取中等偏上个体，偏保守。
         'person': 1.70,
     })
-    default_height: float = 1.50   # 类别未登记时的兜底（只在标签缺失的降级路径上用到）
     pitch_deg: float = 0.0         # 相机俯仰角，向下为正，单位度
     camera_height: float = 0.0     # 相机安装高度（米），卷尺量。0 = 未测量，接触点法不可用
     min_pixel_height: int = 8      # 像素高度低于此值时不测距（噪声不可信）
@@ -152,9 +151,15 @@ class RangingConfig:
     person_width_m: float = 0.46   # 成年人肩宽默认值（米），参考级精度
     min_pixel_width: int = 40      # 框宽低于此值不启用宽度法（噪声不可信）
 
-    def height_for(self, class_name: str) -> float:
-        return self.object_heights.get(
-            canonical_class_name(class_name), self.default_height)
+    def height_for(self, class_name: str) -> Optional[float]:
+        """该类别登记的真实高度（米）。**未登记返回 None，不再给兜底值。**
+
+        历史实现查不到表项时回落到 ``default_height``（1.50 m）—— 那等于
+        **编一个身高去算距离**，与 CHARTER 第 4 条「拿不到可靠值就说不可测」
+        直接冲突（2026-09-27 用户明确要求：非 person 拒绝出距离，已删除）。
+        调用方必须自己处理 None（见 ``distance`` 与 ``measure_from_box``）。
+        """
+        return self.object_heights.get(canonical_class_name(class_name))
 
     @classmethod
     def from_params(cls, params) -> 'RangingConfig':
@@ -168,7 +173,7 @@ class RangingConfig:
                 canonical_class_name(k): v
                 for k, v in (getattr(params, 'object_heights', {}) or {}).items()
             },
-            default_height=float(getattr(params, 'default_object_height', 1.50)),
+            # 无 default_height：v1.4 起类别未登记一律拒绝出距离（见 height_for）
             pitch_deg=float(getattr(params, 'pitch_deg', 0.0)),
             camera_height=float(getattr(params, 'camera_height', 0.0)),
             height_tolerance=float(getattr(params, 'height_tolerance', 0.35)),
@@ -1047,7 +1052,7 @@ class GeometricRanger:
                        因为底边对应目标与地面的接触点，才是真正的测距基准
         class_name   : 类别名，用于查表取真实高度
 
-        返回 ``None`` 表示无法可靠测距（内参无效、目标太小等）。
+        返回 ``None`` 表示无法可靠测距（内参无效、目标太小、类别未登记真实高度）。
         """
         if not self.intrinsics.is_valid():
             return None
@@ -1055,6 +1060,10 @@ class GeometricRanger:
             return None
 
         real_h = self.config.height_for(class_name)
+        if real_h is None:
+            # 类别未登记真实高度 -> 不出数。**不给兜底身高**：用一个编造的身高
+            # 算出来的距离看着正常、却可能差几倍（见 height_for docstring）。
+            return None
         fy = self.intrinsics.fy
 
         # 沿光轴的深度
@@ -1137,6 +1146,29 @@ class GeometricRanger:
         # 宽度法门 / 身高表 / 宽高比表全部按规范英文名匹配（2026-09-25 22:14
         # 录制实证：不归一化时 person 专属逻辑整体静默失效）。
         class_name = canonical_class_name(class_name)
+
+        # ---- 类别门（CHARTER v1.4：全链路唯一类别 = 行人）--------------------
+        # 非 person 一律**拒绝出距离**，包括接触点法。接触点法本身与目标高度
+        # 无关，几何上对任何「踩在地上的物体」都成立 —— 但它给出的只是
+        # 「画面里某个点在几米外」，而本项目的下游（TTC、追踪目标、录制数据轨、
+        # 人特征档案）全部按「人在哪」来解释这个数。放行非 person 等于让下游
+        # 拿到一个语义不明的距离（2026-09-27 用户明确要求拒出）。
+        #
+        # 这里也是唯一一处「类别白名单」的强制点：高度法/宽度法/宽高比体检
+        # 各自的门都靠表项存在与否，分散在多处；集中在这里，新增方法不会再漏。
+        #
+        # 触发这条门的现实路径有两条：
+        #   · 标签文件缺失 -> 目标类别为「未知」（person 白名单建不起来，
+        #     非 person 的框会漏进来，见 detector._refresh_person_class_ids）；
+        #   · 标签文件被换成非 COCO 的、或类别确实不是人。
+        # 两条都不该给数字 —— 后者是定位外的目标，前者连「是不是人」都不知道。
+        if class_name not in self.config.object_heights:
+            if not class_name or class_name == '未知':
+                return RangingResult(
+                    reason='目标类别未知（标签文件未加载或类别不在高度表内）：'
+                           '本项目只测行人，拒出距离。请到设置页确认标签文件已加载')
+            return RangingResult(
+                reason=f'「{class_name}」不是登记类别（本项目只测行人），拒出距离')
 
         h_px = float(box.get('height', 0.0))
         w_px = float(box.get('width', 0.0))
@@ -1316,7 +1348,7 @@ class GeometricRanger:
                     reason=(f'框形状不像全身（宽高比 {vis.aspect:.2f}，'
                             f'{class_name} 正常 {lo:.2f}~{hi:.2f}），目标可能不完整'))
 
-        # 高度法：要求框完整，且该类别登记过真实高度（未登记不再兜底）
+        # 高度法：要求框完整（类别已在方法开头过门 —— 未登记者根本走不到这里）
         d_height = None
         if vis.height_method_ok and class_name in self.config.object_heights:
             d_height = self.distance(pixel_height=h_px, bottom_v=bottom_v,
@@ -1344,12 +1376,7 @@ class GeometricRanger:
             return RangingResult(distance=d_height, method='高度法')
 
         # ---- 都不行：把原因说到点子上，绝不给兜底数字 ----
-        if class_name not in self.config.object_heights:
-            if self.config.camera_height <= 0:
-                return RangingResult(
-                    reason=f'「{class_name or "未知"}」不在高度表内，'
-                           f'且未填相机安装高度')
-            return RangingResult(reason=f'「{class_name or "未知"}」不在高度表内')
+        # 「类别不在高度表内」的分支在方法开头已由类别门拦下，这里不再重复。
         if self.config.camera_height <= 0:
             return RangingResult(reason='未填相机安装高度')
         return RangingResult(reason='测距条件不足')

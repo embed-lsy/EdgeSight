@@ -806,12 +806,18 @@ class Ui_Form(object):
 
         self.horizontalLayout_30.addWidget(self.label_37)
 
-        self.combo_target_select_rule = QComboBox(self.groupBox_12)
-        self.combo_target_select_rule.addItem("")
-        self.combo_target_select_rule.setObjectName(u"combo_target_select_rule")
-        self.combo_target_select_rule.setMinimumSize(QSize(0, 50))
+        self.combo_track_target = QComboBox(self.groupBox_12)
+        self.combo_track_target.addItem("")
+        self.combo_track_target.setObjectName(u"combo_track_target")
+        self.combo_track_target.setMinimumSize(QSize(0, 50))
 
-        self.horizontalLayout_30.addWidget(self.combo_target_select_rule)
+        self.horizontalLayout_30.addWidget(self.combo_track_target)
+
+        self.btn_rename_track_target = QPushButton(self.groupBox_12)
+        self.btn_rename_track_target.setObjectName(u"btn_rename_track_target")
+        self.btn_rename_track_target.setMinimumSize(QSize(0, 50))
+
+        self.horizontalLayout_30.addWidget(self.btn_rename_track_target)
 
 
         self.verticalLayout_22.addLayout(self.horizontalLayout_30)
@@ -1068,6 +1074,60 @@ class Ui_Form(object):
 
         self.verticalLayout_25.addWidget(self.groupBox_calib)
 
+        self.groupBox_enroll = QGroupBox(self.scrollAreaWidgetContents)
+        self.groupBox_enroll.setObjectName(u"groupBox_enroll")
+        self.verticalLayout_enroll = QVBoxLayout(self.groupBox_enroll)
+        self.verticalLayout_enroll.setObjectName(u"verticalLayout_enroll")
+        self.label_enroll_hint = QLabel(self.groupBox_enroll)
+        self.label_enroll_hint.setObjectName(u"label_enroll_hint")
+        self.label_enroll_hint.setWordWrap(True)
+
+        self.verticalLayout_enroll.addWidget(self.label_enroll_hint)
+
+        self.horizontalLayout_enroll1 = QHBoxLayout()
+        self.horizontalLayout_enroll1.setObjectName(u"horizontalLayout_enroll1")
+        self.label_enroll_dist = QLabel(self.groupBox_enroll)
+        self.label_enroll_dist.setObjectName(u"label_enroll_dist")
+
+        self.horizontalLayout_enroll1.addWidget(self.label_enroll_dist)
+
+        self.spin_enroll_distance = QDoubleSpinBox(self.groupBox_enroll)
+        self.spin_enroll_distance.setObjectName(u"spin_enroll_distance")
+        self.spin_enroll_distance.setDecimals(2)
+        self.spin_enroll_distance.setMaximum(50.000000000000000)
+        self.spin_enroll_distance.setSingleStep(0.100000000000000)
+        self.spin_enroll_distance.setValue(0.000000000000000)
+
+        self.horizontalLayout_enroll1.addWidget(self.spin_enroll_distance)
+
+        self.btn_enroll_toggle = QPushButton(self.groupBox_enroll)
+        self.btn_enroll_toggle.setObjectName(u"btn_enroll_toggle")
+        self.btn_enroll_toggle.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_enroll1.addWidget(self.btn_enroll_toggle)
+
+
+        self.verticalLayout_enroll.addLayout(self.horizontalLayout_enroll1)
+
+        self.label_enroll_status = QLabel(self.groupBox_enroll)
+        self.label_enroll_status.setObjectName(u"label_enroll_status")
+        font1 = QFont()
+        font1.setPointSize(20)
+        font1.setBold(True)
+        self.label_enroll_status.setFont(font1)
+        self.label_enroll_status.setWordWrap(True)
+
+        self.verticalLayout_enroll.addWidget(self.label_enroll_status)
+
+        self.label_enroll_match = QLabel(self.groupBox_enroll)
+        self.label_enroll_match.setObjectName(u"label_enroll_match")
+        self.label_enroll_match.setWordWrap(True)
+
+        self.verticalLayout_enroll.addWidget(self.label_enroll_match)
+
+
+        self.verticalLayout_25.addWidget(self.groupBox_enroll)
+
         self.scrollArea.setWidget(self.scrollAreaWidgetContents)
 
         self.verticalLayout_20.addWidget(self.scrollArea)
@@ -1246,9 +1306,13 @@ class Ui_Form(object):
         self.combo_hardware_accel.setItemText(2, QCoreApplication.translate("Form", u"NPU", None))
 
         self.groupBox_12.setTitle(QCoreApplication.translate("Form", u"\u68c0\u6d4b\u914d\u7f6e", None))
-        self.label_37.setText(QCoreApplication.translate("Form", u"\u76ee\u6807\u9009\u62e9\u89c4\u5219\uff1a", None))
-        self.combo_target_select_rule.setItemText(0, QCoreApplication.translate("Form", u"\u6700\u9ad8\u7f6e\u4fe1\u5ea6", None))
+        self.label_37.setText(QCoreApplication.translate("Form", u"\u8ffd\u8e2a\u76ee\u6807\u9009\u62e9\uff1a", None))
+        self.combo_track_target.setItemText(0, QCoreApplication.translate("Form", u"\uff08\u5c1a\u65e0\u6307\u7eb9\u6863\u6848\uff09", None))
 
+#if QT_CONFIG(tooltip)
+        self.combo_track_target.setToolTip(QCoreApplication.translate("Form", u"\u5355\u9009\u4e00\u6761\u6307\u7eb9\u6863\u6848\u4f5c\u4e3a\u552f\u4e00\u8ffd\u8e2a\u76ee\u6807\uff08\u5217\u8868\u6765\u81ea models/person_profile.json\uff09\u3002\u6d4b\u8ddd\u53ea\u5bf9\u88ab\u8ffd\u8e2a\u7684\u8fd9\u4e00\u4e2a\u51fa\u6570\uff1b\u540d\u5b57\u53ef\u7528\u53f3\u4fa7\u6309\u94ae\u6539\u3002", None))
+#endif // QT_CONFIG(tooltip)
+        self.btn_rename_track_target.setText(QCoreApplication.translate("Form", u"\u91cd\u547d\u540d\u2026", None))
         self.label_29.setText(QCoreApplication.translate("Form", u"\u57fa\u51c6\u5bbd\u5ea6\uff1a", None))
         self.label_base_width.setText(QCoreApplication.translate("Form", u"30", None))
         self.groupBox_14.setTitle(QCoreApplication.translate("Form", u"\u6807\u5b9a\u4e0e\u7cfb\u7edf", None))
@@ -1286,6 +1350,15 @@ class Ui_Form(object):
         self.btn_calib_capture.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u91c7\u96c6", None))
         self.btn_calib_solve.setText(QCoreApplication.translate("Form", u"\u6c42\u89e3\u5e76\u4fdd\u5b58", None))
         self.label_calib_info.setText(QCoreApplication.translate("Form", u"\u672a\u91c7\u96c6\u3002\u70b9\u300c\u5f00\u59cb\u91c7\u96c6\u300d\uff0c\u8ba9\u68cb\u76d8\u683c\u5728\u753b\u9762\u4e2d\u53d8\u6362\u4f4d\u7f6e\u4e0e\u503e\u659c\u89d2\uff1b\u91c7\u591f 10 \u5e27\u540e\u70b9\u300c\u6c42\u89e3\u5e76\u4fdd\u5b58\u300d\u3002", None))
+        self.groupBox_enroll.setTitle(QCoreApplication.translate("Form", u"\u5efa\u6863\uff08\u7b2c\u4e09\u6b65\uff1a\u8ba9\u7a0b\u5e8f\u8bb0\u4f4f\u8fd9\u4e2a\u4eba\uff09", None))
+        self.label_enroll_hint.setText(QCoreApplication.translate("Form", u"\u8ba9\u88ab\u767b\u8bb0\u8005\u8d70\u5230\u753b\u9762\u4e2d\u95f4\uff083-10 m\uff09\uff0c\u70b9\u300c\u5f00\u59cb\u5efa\u6863\u300d\u540e\u7ad9\u5b9a\u7ea6 3 \u79d2\uff0c\u6512\u591f\u7a33\u5b9a\u7a97\u53e3\u5373\u81ea\u52a8\u8bb0\u5165\u6863\u6848\u3002\u53ef\u8fde\u7eed\u7ed9\u591a\u4eba\u5efa\u6863\uff1a\u8ba9\u4ed6\u8d70\u51fa\u753b\u9762\uff0c\u6362\u4e0b\u4e00\u4e2a\u4eba\u518d\u8d70\u8fdb\u6765\u3002", None))
+        self.label_enroll_dist.setText(QCoreApplication.translate("Form", u"\u91c7\u6837\u70b9\u8ddd\u79bb\uff08m\uff09\uff1a", None))
+#if QT_CONFIG(tooltip)
+        self.spin_enroll_distance.setToolTip(QCoreApplication.translate("Form", u"\u7559 0 = \u7528\u6d4b\u8ddd\u503c\u53cd\u89e3\u8eab\u9ad8/\u80a9\u5bbd\uff08\u9700\u5148\u5b8c\u6210\u5185\u53c2 + \u5b89\u88c5\u53c2\u6570\u6807\u5b9a\uff09\uff1b\u586b\u5927\u4e8e 0 = \u7528\u8fd9\u4e2a\u624b\u586b\u8ddd\u79bb\uff0c\u7ed5\u8fc7\u6807\u5b9a\u3002\u8ddd\u79bb\u662f\u955c\u5934\u5230\u4eba\u7684\u6c34\u5e73\u8ddd\u79bb\uff0c\u5377\u5c3a\u91cf\u3002", None))
+#endif // QT_CONFIG(tooltip)
+        self.btn_enroll_toggle.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u5efa\u6863", None))
+        self.label_enroll_status.setText(QCoreApplication.translate("Form", u"\u672a\u5f00\u59cb", None))
+        self.label_enroll_match.setText(QCoreApplication.translate("Form", u"\u5339\u914d\uff1a\u672c\u5e27\u672a\u8ba1\u7b97", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_setting), QCoreApplication.translate("Form", u"\u8bbe\u7f6e", None))
         self.groupBox_rec.setTitle(QCoreApplication.translate("Form", u"\u5f55\u5236", None))
         self.btn_rec_toggle.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u5f55\u5236", None))

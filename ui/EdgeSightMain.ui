@@ -998,7 +998,7 @@ QLineEdit, QTextEdit {
                 <item>
                  <widget class="QLabel" name="label_37">
                   <property name="text">
-                   <string>目标选择规则：</string>
+                   <string>追踪目标选择：</string>
                   </property>
                   <property name="alignment">
                    <set>Qt::AlignmentFlag::AlignCenter</set>
@@ -1006,18 +1006,34 @@ QLineEdit, QTextEdit {
                  </widget>
                 </item>
                 <item>
-                 <widget class="QComboBox" name="combo_target_select_rule">
+                 <widget class="QComboBox" name="combo_track_target">
                   <property name="minimumSize">
                    <size>
                     <width>0</width>
                     <height>50</height>
                    </size>
                   </property>
+                  <property name="toolTip">
+                   <string>单选一条指纹档案作为唯一追踪目标（列表来自 models/person_profile.json）。测距只对被追踪的这一个出数；名字可用右侧按钮改。</string>
+                  </property>
                   <item>
                    <property name="text">
-                    <string>最高置信度</string>
+                    <string>（尚无指纹档案）</string>
                    </property>
                   </item>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btn_rename_track_target">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>50</height>
+                   </size>
+                  </property>
+                  <property name="text">
+                   <string>重命名…</string>
+                  </property>
                  </widget>
                 </item>
                </layout>
@@ -1435,6 +1451,94 @@ QLineEdit, QTextEdit {
                <widget class="QLabel" name="label_calib_info">
                 <property name="text">
                  <string>未采集。点「开始采集」，让棋盘格在画面中变换位置与倾斜角；采够 10 帧后点「求解并保存」。</string>
+                </property>
+                <property name="wordWrap">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="groupBox_enroll">
+             <property name="title">
+              <string>建档（第三步：让程序记住这个人）</string>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayout_enroll">
+              <item>
+               <widget class="QLabel" name="label_enroll_hint">
+                <property name="text">
+                 <string>让被登记者走到画面中间（3-10 m），点「开始建档」后站定约 3 秒，攒够稳定窗口即自动记入档案。可连续给多人建档：让他走出画面，换下一个人再走进来。</string>
+                </property>
+                <property name="wordWrap">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_enroll1">
+                <item>
+                 <widget class="QLabel" name="label_enroll_dist">
+                  <property name="text">
+                   <string>采样点距离（m）：</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QDoubleSpinBox" name="spin_enroll_distance">
+                  <property name="toolTip">
+                   <string>留 0 = 用测距值反解身高/肩宽（需先完成内参 + 安装参数标定）；填大于 0 = 用这个手填距离，绕过标定。距离是镜头到人的水平距离，卷尺量。</string>
+                  </property>
+                  <property name="decimals">
+                   <number>2</number>
+                  </property>
+                  <property name="maximum">
+                   <double>50.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.100000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>0.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btn_enroll_toggle">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>40</height>
+                   </size>
+                  </property>
+                  <property name="text">
+                   <string>开始建档</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_enroll_status">
+                <property name="font">
+                 <font>
+                  <pointsize>20</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>未开始</string>
+                </property>
+                <property name="wordWrap">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_enroll_match">
+                <property name="text">
+                 <string>匹配：本帧未计算</string>
                 </property>
                 <property name="wordWrap">
                  <bool>true</bool>
