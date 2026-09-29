@@ -1040,15 +1040,40 @@ class Ui_Form(object):
 
         self.groupBox_calib_preview = QGroupBox(self.tab_calib)
         self.groupBox_calib_preview.setObjectName(u"groupBox_calib_preview")
-        self.verticalLayout_calibprev = QVBoxLayout(self.groupBox_calib_preview)
-        self.verticalLayout_calibprev.setObjectName(u"verticalLayout_calibprev")
+        self.horizontalLayout_calibprev = QHBoxLayout(self.groupBox_calib_preview)
+        self.horizontalLayout_calibprev.setObjectName(u"horizontalLayout_calibprev")
         self.lbl_calib_view = QLabel(self.groupBox_calib_preview)
         self.lbl_calib_view.setObjectName(u"lbl_calib_view")
         self.lbl_calib_view.setMinimumSize(QSize(320, 240))
+        sizePolicy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        sizePolicy.setHorizontalStretch(1)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.lbl_calib_view.sizePolicy().hasHeightForWidth())
+        self.lbl_calib_view.setSizePolicy(sizePolicy)
         self.lbl_calib_view.setMaximumSize(QSize(16777215, 300))
         self.lbl_calib_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.verticalLayout_calibprev.addWidget(self.lbl_calib_view)
+        self.horizontalLayout_calibprev.addWidget(self.lbl_calib_view)
+
+        self.verticalLayout_calibdist = QVBoxLayout()
+        self.verticalLayout_calibdist.setObjectName(u"verticalLayout_calibdist")
+        self.label_calib_dist_title = QLabel(self.groupBox_calib_preview)
+        self.label_calib_dist_title.setObjectName(u"label_calib_dist_title")
+        self.label_calib_dist_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_calib_dist_title.setStyleSheet(u"font-size: 11pt;")
+
+        self.verticalLayout_calibdist.addWidget(self.label_calib_dist_title)
+
+        self.lbl_calib_distance = QLabel(self.groupBox_calib_preview)
+        self.lbl_calib_distance.setObjectName(u"lbl_calib_distance")
+        self.lbl_calib_distance.setMinimumSize(QSize(170, 0))
+        self.lbl_calib_distance.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_calib_distance.setStyleSheet(u"font-weight: bold; font-size: 26pt;")
+
+        self.verticalLayout_calibdist.addWidget(self.lbl_calib_distance)
+
+
+        self.horizontalLayout_calibprev.addLayout(self.verticalLayout_calibdist)
 
 
         self.verticalLayout_calibtab.addWidget(self.groupBox_calib_preview)
@@ -1441,6 +1466,8 @@ class Ui_Form(object):
         self.label_calibtab_hint.setText(QCoreApplication.translate("Form", u"\u6807\u5b9a\u4e0e\u767b\u8bb0\u5171\u4e09\u4ef6\uff0c\u4e92\u4e0d\u4f9d\u8d56\u3001\u6309\u9700\u505a\uff1a\u2460 \u68cb\u76d8\u6807\u5b9a\uff08\u5185\u53c2\u4e0e\u672c\u673a\u8bbe\u5907\u7ed1\u5b9a\uff09\u2192 \u2461 \u91c7\u6837\u70b9\u6807\u5b9a\uff08\u5b89\u88c5\u9ad8\u5ea6/\u4fef\u89d2\uff09\u2192 \u2462 \u6307\u7eb9\u5efa\u6863\uff08\u8bb0\u4f4f\u8fd9\u4e2a\u4eba\uff09\u3002\u524d\u4e24\u4ef6\u968f\u8bbe\u5907\u505a\u4e00\u6b21\uff0c\u7b2c\u4e09\u4ef6\u6bcf\u6362\u4e00\u4e2a\u4eba\u505a\u4e00\u6b21\u3002\u4e09\u4ef6\u90fd\u8981\u770b\u7740\u4e0b\u9762\u7684\u753b\u9762\u64cd\u4f5c\u3002", None))
         self.groupBox_calib_preview.setTitle(QCoreApplication.translate("Form", u"\u753b\u9762\uff08\u5e26\u68c0\u6d4b\u6846\u4e0e\u6d4b\u8ddd\uff09", None))
         self.lbl_calib_view.setText(QCoreApplication.translate("Form", u"\u6444\u50cf\u5934\u672a\u8fde\u63a5", None))
+        self.label_calib_dist_title.setText(QCoreApplication.translate("Form", u"\u76ee\u6807\u8ddd\u79bb", None))
+        self.lbl_calib_distance.setText(QCoreApplication.translate("Form", u"\u4e0d\u53ef\u6d4b", None))
         self.groupBox_calib.setTitle(QCoreApplication.translate("Form", u"\u2460 \u68cb\u76d8\u6807\u5b9a\uff08\u5185\u53c2\uff09", None))
         self.label_camera_device.setText(QCoreApplication.translate("Form", u"\u672c\u673a\u6444\u50cf\u5934\uff1a", None))
 #if QT_CONFIG(tooltip)

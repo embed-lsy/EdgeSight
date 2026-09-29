@@ -1381,11 +1381,11 @@ QLineEdit, QTextEdit {
         </widget>
        </item>
        <item>
-        <widget class="QGroupBox" name="groupBox_calib_preview">
+                <widget class="QGroupBox" name="groupBox_calib_preview">
          <property name="title">
           <string>画面（带检测框与测距）</string>
          </property>
-         <layout class="QVBoxLayout" name="verticalLayout_calibprev">
+         <layout class="QHBoxLayout" name="horizontalLayout_calibprev">
           <item>
            <widget class="QLabel" name="lbl_calib_view">
             <property name="minimumSize">
@@ -1393,6 +1393,12 @@ QLineEdit, QTextEdit {
               <width>320</width>
               <height>240</height>
              </size>
+            </property>
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+              <horstretch>1</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
             </property>
             <property name="text">
              <string>摄像头未连接</string>
@@ -1407,6 +1413,42 @@ QLineEdit, QTextEdit {
              <set>Qt::AlignmentFlag::AlignCenter</set>
             </property>
            </widget>
+          </item>
+          <item>
+           <layout class="QVBoxLayout" name="verticalLayout_calibdist">
+            <item>
+             <widget class="QLabel" name="label_calib_dist_title">
+              <property name="text">
+               <string>目标距离</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignmentFlag::AlignCenter</set>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">font-size: 11pt;</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="lbl_calib_distance">
+              <property name="minimumSize">
+               <size>
+                <width>170</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>不可测</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignmentFlag::AlignCenter</set>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">font-weight: bold; font-size: 26pt;</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
          </layout>
         </widget>

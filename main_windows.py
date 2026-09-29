@@ -166,6 +166,11 @@ class MainWindow(QWidget, Ui_Form):
         # 画面叠加与距离读数共用它：不是他 -> 不画框、不出数（2026-09-29 用户要求
         # 「没认出就把这个陌生人的检测框也扔掉，距离显示不可测，下面标注原因」）。
         self._identity_reject_note = None
+        # 标定页专用的测距结果：**不受身份拦截影响**（2026-09-29 用户要求
+        # 「标定页面不需要做追踪，只需要识别人并显示距离」）。拦截会把 res/dist
+        # 抹成不可测 —— 那是监视页的口径；标定页要的是「这一帧测出来多少」，
+        # 所以取的是拦截**之前**的结论（可见性体检 / 去噪 / 速度门控都已过）。
+        self._calib_ranging = None
         self.is_loading_model=False
         # 标定状态：不采集时 calibrator 为 None，避免误采集普通帧
         self.calibrator = None
@@ -1949,6 +1954,9 @@ class MainWindow(QWidget, Ui_Form):
         # 回放路径没有「认人」这回事（重识别在本项目里只记录、不在回放里判定），
         # 所以身份拦截必须**显式关掉** —— 否则会把实时画面留下的红字带进回放。
         self._identity_reject_note = None
+        # 标定页那份「拦截前测距结论」同理清掉：回放没有实时测距，标定页该读的是
+        # 录制里的规范距离（_refresh_calib_distance 的兜底分支）。
+        self._calib_ranging = None
         self._display_frame(frame)
 
         if not self._replay_seeking:
@@ -1981,7 +1989,15 @@ class MainWindow(QWidget, Ui_Form):
         if page is not self.tab_monitor and page is not self.tab_calib:
             return
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        draw_img = self._draw_overlay(frame_rgb)
+        # 叠加重绘走哪条口径由**当前页**决定（2026-09-29 用户要求）：
+        #   监视页 = 追踪口径 —— 认不出就丢框、写 Not Target；
+        #   标定页 = 只识人不追踪 —— 有框就画框，谁在画面里都画。
+        # 标定页之所以不能沿用追踪口径：①②③ 三步都要**看着画面确认目标完整
+        # 入画**，而追踪口径会把「不是追踪目标」的人连框一起抹掉 —— 用户站到
+        # 镜头前却看不到框，等于没法标定。用户原话：「标定页面的画面不能和监控
+        # 页面下的 AI 处理后的画面一样，标定页面不需要做追踪，只需要识别人并
+        # 显示距离就行了」。
+        draw_img = self._draw_overlay(frame_rgb, track=(page is self.tab_monitor))
 
         if page is self.tab_monitor:
             h, w, ch = frame_rgb.shape
@@ -1991,25 +2007,50 @@ class MainWindow(QWidget, Ui_Form):
             target_lbl = self.lbl_process
         else:
             target_lbl = self.lbl_calib_view
+            self._refresh_calib_distance()
 
         h2, w2, ch2 = draw_img.shape
         qt_img2 = QImage(draw_img.data, w2, h2, ch2 * w2, QImage.Format_RGB888)
         target_lbl.setPixmap(QPixmap.fromImage(qt_img2).scaled(
             target_lbl.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
-    def _draw_overlay(self, frame_rgb):
+    def _refresh_calib_distance(self):
+        """把标定页右侧那个大号距离数字刷成当前值。
+
+        取值优先级：① 实时链路存下的 `_calib_ranging`（拦截前的测距结论）；
+        ② 回放链路没有实时测距，退回录制里的**规范距离**（与曲线/摘要同源）。
+        两者都没有就是「不可测」—— 与监视页读数用 `RangingResult.display()`，
+        同一套文案（存疑带「？」，不隐藏数据）。
+        """
+        res = self._calib_ranging
+        if res is not None:
+            txt = res.display()
+            # 悬停说明复用监视页那一份（同源），省得「为什么不可测」在标定页查不到
+            tip = self._ranging_tooltip(res)
+        else:
+            d = self.global_params.distance
+            txt = f'{d:.2f} m' if d is not None else '不可测'
+            tip = ''
+        if self.lbl_calib_distance.text() != txt:
+            self.lbl_calib_distance.setText(txt)
+        self.lbl_calib_distance.setToolTip(tip)
+
+    def _draw_overlay(self, frame_rgb, track=True):
         """在 RGB 帧副本上画检测框与读数，返回副本。**不改动入参**。
+
+        ``track``：监视页传 True（追踪口径），标定页传 False（只识人口径）。
+        标定页不做追踪 —— 有检测框就画，不看「是不是追踪目标」。
 
         三种状态（互斥，且与「出不出数」同源 —— 画面与读数不能各说各话）：
 
         ① 检测到的**不是**追踪目标：不画框。画上去等于向用户宣称「这就是他」，
            而距离那一侧已经按「不可测」处理了，两边必须一致（2026-09-29 用户：
-           「没认出就把这个陌生人的检测框也扔掉」）。
+           「没认出就把这个陌生人的检测框也扔掉」）。**仅追踪口径有这一态**。
         ② 有可用目标：画框 + 类别/置信度/距离。
         ③ 本帧没有目标：写「No Target」。
         """
         draw_img = frame_rgb.copy()
-        if self._identity_reject_note:
+        if track and self._identity_reject_note:
             # 字必须是 ASCII：cv2.putText 只认 Hershey 字库，写中文会渲染成一串问号。
             # ⚠️ 这里是 **RGB** 缓冲（入参已由 BGR 转过），(255,165,0) 才是橙；
             #    写成 (0,165,255) 会变蓝。（下面 'No Target' 那行是 BGR 口径的
@@ -3175,6 +3216,10 @@ class MainWindow(QWidget, Ui_Form):
             # 比「不可测」更坏，与 1.4 节「门控拦的是错值，不是拦人」同一条理。
             # 位置必须在 observe() 之后（判定在那里才产生）、在下面所有消费点
             # 之前（global_params.distance / TTC / 曲线 / 录制 / 读数）。
+            # 标定页要用**拦截前**的测距结论（它不做追踪，见 _refresh_calib_distance）：
+            # 拦截把 res/dist 抹成不可测是监视页的口径，标定页要的是「这一帧测出来
+            # 多少」。所以在这里、在下面那条拦截之前，把结论原样存一份。
+            self._calib_ranging = res
             reject_note = self._identity_reject_reason()
             if reject_note:
                 self._identity_reject_note = reject_note
@@ -3197,6 +3242,10 @@ class MainWindow(QWidget, Ui_Form):
                 self._set_match_line('匹配：本帧无可用检测框，未计算')
             else:
                 self._set_match_line('匹配：本帧画面里没有人，未计算')
+            # 标定页那份结论同理必须清掉：留着就会显示上一个人的读数，和画面里
+            # 现在这个框对不上。三种情形（不是人 / 无框 / 未标定）一律清空，
+            # 标定页随即退回读 `global_params.distance`（通常也是「不可测」）。
+            self._calib_ranging = None
         # 到这里 dist 已是全链路唯一的规范距离（去噪在测距之后立即完成，
         # 见上方「距离去噪」段）：门控/人档案/读数/TTC/曲线/录制都用它。
         self.global_params.distance = dist
