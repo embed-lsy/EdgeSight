@@ -307,10 +307,14 @@
       <strong>为什么采样点标定搬到了「标定」页：</strong>记采样点和建档<strong>都要盯着画面</strong>
       （要确认人完整入画、确实站在卷尺那个点上），所以这一页<strong>自带一块实时画面</strong>
       —— 采点、建档都在这一页完成，不用在「监视」页和「设置」页之间来回切。<br><br>
-      <strong>这一页怎么排的：</strong>画面固定在页顶<strong>不动</strong>，下面按
+      <strong>这一页怎么排的：</strong>画面固定在页顶<strong>不动</strong>
+      （栏内<strong>左边是画面与检测框、右边是一个大号的距离数字</strong>），下面按
       <strong>① 棋盘标定（内参）→ ② 采样点标定（安装参数）→ ③ 指纹建档</strong> 的顺序排，
       三组在下方滚动。<strong>画面不跟着滚是有意的</strong>：滚到 ②③ 时你还得看得见画面，
-      否则采点和建档就成了"盲操作"。
+      否则采点和建档就成了"盲操作"。<br><br>
+      <strong>这一页的画面对人「一视同仁」</strong>：它只识别「有没有人」并显示距离，
+      <strong>不做追踪</strong> —— 就算你还没指定追踪目标、或者站的不是被追踪的那个人，
+      框和距离照常出现（详见 §3.5.2 末尾那个对照表）。
     </div>
     在 ② 组里找到 <span class="kbd">已知距离（m）</span>：
     <ul>
@@ -502,6 +506,28 @@
   与认谁无关）。</span>
   <span class="note">指定追踪目标另一件已经生效的事：<strong>近场宽度法改为恒用该目标档案里的肩宽</strong>
   （这正是建档的意义）；没指定时程序沿用旧行为（本帧匹配到谁就用谁的肩宽）。</span>
+
+  <div class="box ok-box">
+    <strong>标定页那一栏 = 左画面 + 右大号距离数字，而且这一栏不做追踪（2026-09-29 起）</strong>
+    <p style="margin:.4em 0">标定页顶那块画面和监视页的 AI 画面<strong>不再是同一个口径</strong>：
+    栏内左边是画面与检测框，右边是一个大字号的当前距离。</p>
+    <table>
+      <tr><th>页</th><th>画面叠加</th><th>距离</th></tr>
+      <tr><td>监视页</td><td>追踪口径：认不出就<strong>丢框</strong>、写 <code>Not Target</code></td>
+        <td><code>不可测</code>（外加下面那行原因）</td></tr>
+      <tr><td>标定页</td><td>只识人口径：<strong>有框就画</strong>，不看「是不是追踪目标」</td>
+        <td>右侧大数字＝<strong>拦截之前</strong>的测距结论</td></tr>
+    </table>
+    <p style="margin:.4em 0"><strong>为什么必须有这个区别</strong>：① 棋盘 / ② 采样点 / ③ 建档
+    三步都得<strong>看着画面</strong>确认目标完整入画；如果标定页也套追踪口径，站到镜头前的人
+    只要没匹配上就会被<strong>连框一起抹掉</strong>，等于没法标定 —— 所以标定页只识人、不追人。</p>
+    <p style="margin:.4em 0 0">⚠️ <strong>别把两页的读数当成互相矛盾</strong>：监视页给的是
+    「<strong>被追踪的那个人</strong>」的数，标定页给的是「<strong>这一帧测出来多少</strong>」。
+    做标定（①②③）时看标定页；日常监视看监视页。两边的数字格式一致（存疑带 <code>？</code>，
+    不可测就写 <code>不可测</code>，鼠标悬停给原因）。</p>
+    <p style="margin:.4em 0 0">画面里没人 / 不是人 / 相机未标定时，标定页那个大数字会
+    <strong>清空回到「不可测」</strong>，不会留着上一个人的读数；回放时它显示录制里的规范距离。</p>
+  </div>
 
   <h3 style="margin:.8em 0 .4em">3.5.3 · 档案管理：查 / 改 / 删（约 1 分钟）</h3>
   <p style="margin-top:.2em">2026-09-29 新增。切到 <strong>「设置」页 → 下方「指纹档案管理（查 / 改 / 删）」</strong>：</p>
