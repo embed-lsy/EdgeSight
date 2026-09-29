@@ -127,8 +127,42 @@ PERSON_PROFILE_VERSION = 3
 
 # 采样合理性区间：身高/肩宽反解值落在外面说明这一帧有毛病（遮挡、非站姿、
 # 类别误识别），直接丢样本 —— 绝不把离群值往档案里记。
+# 这是**逐帧**的宽区间：它的职责只是丢掉这一帧，代价极小，所以放得宽。
 PLAUSIBLE_HEIGHT_M = (0.90, 2.40)
 PLAUSIBLE_WIDTH_M = (0.15, 1.00)
+
+# 建档（写进档案）用的**严区间**（2026-09-29 新增）。与上面宽区间的区别：
+#   宽区间 = 这一帧丢不丢（代价：少采一帧）
+#   严区间 = 要不要落盘（代价：**一个错值会一直留在库里**，而 width_m 之后
+#            一直参与近场宽度法测距 —— 存错了就一直算错，且不报错）
+# 所以严区间取「成年作业人员」的真实范围，宁可这次建档失败并说清原因。
+#
+# 依据（人体测量学，非本机实测）：成人身高集中在 1.50~1.90 m，
+# 1.40/2.00 是留了余量的边。
+#
+# 肩宽这一栏**不能用「双肩峰间宽」**（成人 0.35~0.41 m）：本模块取的是
+# **检测框宽**反解的宽度，而框宽含手臂与衣着，天然比肩宽大 20~50%。
+# 所以改用**本机实测**定区间：17 段历史录制里「四条边都没贴画面」的 406 帧，
+# 反解宽度 p05=0.377 / 中位 0.484 / p95=0.681（脚本
+# E:\WorkBuddy-Work\scripts\analyze_enroll_plausibility.py）。
+# 区间取 [0.28, 0.75]，在实测 p05/p95 外各留一点余量。
+# ⚠️ 一开始按「肩宽」写成 [0.30, 0.58]，实测立刻证明它偏紧：会把约 15% 的
+# 正常帧当成不合格。这类「把物理量搞错对象」的错，只能靠实测分布发现。
+#
+# ⚠️ 已知代价，必须说清：本机历史录制（17 段）里，未贴边帧的反解身高
+# 中位只有 **1.337 m**（p95=1.597，最高 1.765），**没有一帧达到 1.6** ——
+# 也就是说在这个机位上，反解链路本身系统性偏低。
+# 这意味着身高区间对本机是**偏严**的：正确的建档也可能被拒。
+# 这是**有意**的取舍 —— 反解错的身高同时意味着宽度也错（两者同源、
+# 同一个框），与其静默存一个会毒化测距的值，不如明确说「这次没成、为什么」。
+# 待距离/内参链路的系统性偏差查清后，这两个值应重新评估（它们可配置）。
+ENROLL_HEIGHT_M = (1.40, 2.00)
+ENROLL_WIDTH_M = (0.28, 0.75)
+
+# 反解精度下限：框高越小，「distance × h_px / fy」的相对误差越大
+# （h_px=40 时 2 px 的框边抖动就是 5%）。与 reid_osnet.MIN_BOX_H_PX(32)
+# 同量级，但这里要的是**量体精度**而不是「能不能提特征」，所以略严。
+ENROLL_MIN_BOX_H_PX = 40.0
 
 
 @dataclass
@@ -242,6 +276,9 @@ class PersonFeatureTracker:
                  window_s: float = 3.0,
                  height_cv_max: float = 0.05,
                  ema_alpha: float = 0.30,
+                 enroll_height_m: tuple = ENROLL_HEIGHT_M,
+                 enroll_width_m: tuple = ENROLL_WIDTH_M,
+                 enroll_min_box_h_px: float = ENROLL_MIN_BOX_H_PX,
                  cohort_enabled: bool = False,
                  cohort_admit_below: float = COHORT_ADMIT_BELOW,
                  cohort_quantile: float = COHORT_QUANTILE,
@@ -259,6 +296,15 @@ class PersonFeatureTracker:
         emb_tag
             嵌入来源标记（建议用模型文件名）。档案里记它、匹配时比它 ——
             换模型后旧嵌入与新嵌入不同源，必须拒绝比较而不是算个数出来。
+        enroll_height_m / enroll_width_m / enroll_min_box_h_px
+            **建档复核区间**（2026-09-29 新增）：攒够稳定窗口后、落盘之前，
+            反解出的身高/肩宽必须落在这里面，否则**这一次建档失败**并给出
+            原因，而不是把可疑值静默写进库。
+            为什么要这一步：这两个数之后一直参与近场宽度法测距，**存错了
+            就一直算错、而且不报错**。默认值见 ``ENROLL_HEIGHT_M`` 等常量的
+            注释（含「本机反解系统性偏低、所以这个区间偏严」的已知代价）。
+            三个参数都可配置 —— 它们刻的是「作业人员」这个场景假设，
+            不是本机标定结果。
         cohort_enabled
             **路人池归一化开关，默认关**（``core/reid_cohort.py``）。开启后，
             匹配分数会减去「本场景里路人最多能像到什么程度」再与门槛比，
@@ -290,6 +336,10 @@ class PersonFeatureTracker:
         self.window_s = window_s
         self.height_cv_max = height_cv_max
         self.ema_alpha = ema_alpha
+        # 建档复核区间（落盘前的最后一道闸，见 __init__ docstring）
+        self.enroll_height_m = tuple(enroll_height_m)
+        self.enroll_width_m = tuple(enroll_width_m)
+        self.enroll_min_box_h_px = float(enroll_min_box_h_px)
 
         # 路人池（cohort 归一化）。**无论开关是否打开都建对象** —— 它是一个
         # 空 deque，代价可忽略；这样开关可以运行期翻转，不必重建 tracker。
@@ -304,7 +354,26 @@ class PersonFeatureTracker:
         self._samples: list[dict] = []      # {t, h, w, hist, emb}
         self._enrolling = False             # 是否处于「主动建档会话」中
         self._last_match: dict = {}         # 最近一次匹配的路线/分数/门槛
+        # 本帧「认人」的结论快照（``computed=False`` 表示这一帧没算过）。
+        # 为什么不能直接用 ``active``：那是"最近一次算过的结论"，本帧若没算
+        # （不是人 / 相机未标定 / 框无效）它会**保留上一帧的值**，上层就分不清
+        # 「算出来不是追踪目标」与「本帧根本没算」—— 而这两种情况该不该拦
+        # 是相反的（见 main_windows._identity_reject_reason 的两条「不拦」）。
+        self._frame_identity: dict = self._no_identity()
         self._commits = 0                   # 累计提交次数（UI 据此播报提示音）
+        # 建档反馈（2026-09-29）：这两个字段的存在本身就是为了「别静默」——
+        # 原先 observe()/ _try_commit() 的每个不通过分支都是裸 return，
+        # 用户站在镜头前只能空等，分不清是没采到、采了不合格、还是程序坏了。
+        self._last_block: dict = {}         # 本帧为何没采样（逐帧更新，会自清）
+        self._failures = 0                  # 复核不通过的累计次数
+        self._last_failure: dict = {}       # 最近一次失败（带递增 seq，供 UI 一次性播报）
+        # 失败后「等站位真的变了再采」的参照值（失败时的反解身高中位，米）。
+        # 为什么需要它：失败会清空窗口，但**紧接着的几帧还是旧姿态**（用户
+        # 要先看到提示、再挪位置），它们会被采进新窗口，于是新窗口里旧/新两段
+        # 数据混着，cv 一直超标 -> 界面继续喊「站定别动」，而用户明明站着不动。
+        # 实测（verify_calib_tab_wiring.py E 组）：不设这道闸，改好姿势后仍要等
+        # window_s=3.0 s 旧帧滚出去才可能提交，期间提示是错的。
+        self._await_change: Optional[float] = None
         self._dirty = False
         self.load()
 
@@ -370,11 +439,14 @@ class PersonFeatureTracker:
         if not self._enrolling:
             self._enrolling = True
             self._samples = []
+            # 重新开始一次会话 = 用户确实改变了什么，失败后的等待解除。
+            self._await_change = None
 
     def end_enrollment(self) -> None:
         """结束建档会话：停止采样。未成窗口的样本一并作废。"""
         self._enrolling = False
         self._samples = []
+        self._await_change = None
 
     @property
     def enrolling(self) -> bool:
@@ -390,6 +462,9 @@ class PersonFeatureTracker:
         —— 阈值未校准期间，这是判断「认不出」还是「门槛定错」的唯一依据。
         """
         m = self._last_match or {}
+        b = self._last_block or {}
+        hs = [s['h'] for s in self._samples]
+        ws = [s['w'] for s in self._samples]
         return {
             'enrolling': self._enrolling,
             'commits': self._commits,
@@ -401,13 +476,51 @@ class PersonFeatureTracker:
             'match_score': float(m.get('score', 0.0)),
             'match_threshold': float(m.get('threshold', 0.0)),
             'match_comparable': int(m.get('comparable', 0)),
+            # -- 建档反馈（2026-09-29）：界面据此回答「为什么还没成」--
+            'block_code': str(b.get('code', '')),
+            'block_text': str(b.get('text', '')),
+            # 窗口内反解值的中位：**建档时就看得见**，不用等提交后才知道
+            # 「怎么只有 1.2 m」—— 这正是本次录到一个可疑档案却毫无察觉的根因。
+            'height_m': float(np.median(hs)) if hs else 0.0,
+            'width_m': float(np.median(ws)) if ws else 0.0,
+            'failures': int(self._failures),
+            'last_failure': dict(self._last_failure) if self._last_failure else {},
+            # 失败后正在等「站位改变」时，这里是非 None 的参照身高（米）
+            'await_change': self._await_change,
+            'enroll_height_range': tuple(self.enroll_height_m),
+            'enroll_width_range': tuple(self.enroll_width_m),
         }
 
     # -- 每帧入口 ----------------------------------------------------------
 
+    @staticmethod
+    def _no_identity() -> dict:
+        """「本帧没算过认人」的判定快照（``computed=False``）。"""
+        return {'computed': False, 'matched': None, 'score': None, 'raw': None,
+                'threshold': None, 'comparable': 0, 'source': ''}
+
+    def frame_identity(self) -> dict:
+        """**本帧** ``observe()`` 里真算出来的身份判定（不是 ``active``）。
+
+        字段：``computed`` 本帧是否真算了认人；``matched`` 算出来的那个人
+        （``None`` = 谁都没匹配上，与"没算"由 ``computed`` 区分）；
+        ``score`` / ``threshold`` / ``comparable`` / ``source`` 与
+        ``match_line()`` 同源，便于上层把「为什么拦」说清。
+
+        为什么要单独开一个入口而不复用 ``active``：``active`` 是"最近一次
+        算过的结论"，本帧没算时它保留旧值；上层据此拦「不该出数的框」时，
+        必须能分辨「算出来不是他」与「本帧根本没算」，否则相机未标定、
+        画面里没人这些情形会被误判成"不是追踪目标"而把整屏拦掉。
+
+        职责边界与 ``ranging_width_m()`` 的 ⚠️ 对齐：本模块只给**结论**，
+        「该不该出数」由上层决定。
+        """
+        return dict(self._frame_identity)
+
     def observe(self, box: dict, frame_rgb, now: float, *,
                 capture_ok: bool, distance_m: Optional[float],
-                fx: float, fy: float, embedding=None) -> None:
+                fx: float, fy: float, embedding=None,
+                capture_note: str = '') -> None:
         """每帧调用（有 person 检测时）。
 
         参数
@@ -416,42 +529,107 @@ class PersonFeatureTracker:
                      调用方按可见性体检与 RangingResult 决定，这里不重复判断
                      —— 判据与测距同源，避免两处各写一套。
         distance_m : 实际用于反解的真实距离（米）。可以是接触点法解出的，
-                     也可以是用户在设置页手填的采样点距离（调用方决定用哪个）。
+                     也可以是用户在标定页手填的采样点距离（调用方决定用哪个）。
                      ``capture_ok=True`` 时必须非 None。
         embedding  : 本帧该人的 OSNet 嵌入（512 维、L2 归一），没有就传 ``None``。
                      **由调用方提取**：本模块刻意不 import onnxruntime，
                      保持纯逻辑、可离线单测。传了它，匹配就走嵌入路子。
+        capture_note
+            ``capture_ok=False`` 时**为什么不合格**的人话说明（调用方最清楚
+            是贴边还是距离不可信）。建档会话里会被记进进度快照，界面据此
+            告诉用户「该怎么办」而不是让他空等 —— 空字符串表示调用方没提供，
+            本模块用一句通用文案兜底。
         """
         hist = torso_appearance(frame_rgb, box)
+        # 先复位成「本帧没算」，只有真算了才填 —— 不复位就会把上一帧的结论
+        # 当成本帧的，上层据此拦框时会把"没算"读成"不是他"。
+        self._frame_identity = self._no_identity()
         if hist is not None or embedding is not None:
             self._match_active(hist, embedding)
             self._feed_cohort(embedding)
+            m = self._last_match or {}
+            self._frame_identity = {
+                'computed': True,
+                'matched': self.active,
+                'score': m.get('score'),
+                'raw': m.get('raw'),
+                'threshold': m.get('threshold'),
+                'comparable': int(m.get('comparable', 0) or 0),
+                'source': m.get('source', ''),
+            }
 
         # 被动路径到此为止：只认人（更新 active），不采样、不落盘。
         # 建档必须由主动会话开启 —— 见类 docstring 的 ⚠️ 说明。
         if not self._enrolling:
             return
 
+        # 以下是建档会话的采样链路。**每个不通过分支都要留下原因** ——
+        # 原先全是裸 return，界面上什么都看不到，用户只能站在镜头前空等，
+        # 分不清「没采到」「采了但不合格」「程序坏了」（2026-09-29 实录反馈）。
         if not capture_ok or distance_m is None or distance_m <= 0:
+            self._note_block('not_ready', capture_note or
+                             '目标未完整入画，或本帧距离不可信')
             return
         if fx <= 0 or fy <= 0:
+            self._note_block('no_intrinsics', '内参不可用（未标定，或标定文件无效）')
             return
 
         h_px = float(box.get('height', 0.0))
         w_px = float(box.get('width', 0.0))
         if h_px <= 0 or w_px <= 0:
+            self._note_block('bad_box', '检测框尺寸无效')
+            return
+        if h_px < self.enroll_min_box_h_px:
+            self._note_block(
+                'box_too_small',
+                f'目标太小（框高 {h_px:.0f} px < {self.enroll_min_box_h_px:.0f} px）'
+                f'—— 走近一些再站定')
             return
         h_m = distance_m * h_px / fy      # pinhole 反解（同 estimate_target_height）
         w_m = distance_m * w_px / fy      # 肩宽同理（见模块 docstring 的精度声明）
         if not (PLAUSIBLE_HEIGHT_M[0] <= h_m <= PLAUSIBLE_HEIGHT_M[1]):
+            self._note_block(
+                'implausible_h',
+                f'本帧反解身高 {h_m:.2f} m 超出采样范围 '
+                f'{PLAUSIBLE_HEIGHT_M[0]:.2f}–{PLAUSIBLE_HEIGHT_M[1]:.2f} m')
             return
         if not (PLAUSIBLE_WIDTH_M[0] <= w_m <= PLAUSIBLE_WIDTH_M[1]):
+            self._note_block(
+                'implausible_w',
+                f'本帧反解肩宽 {w_m:.2f} m 超出采样范围 '
+                f'{PLAUSIBLE_WIDTH_M[0]:.2f}–{PLAUSIBLE_WIDTH_M[1]:.2f} m')
             return
+
+        # 上次「失败」之后，先等用户真的改变站位，再开始干净的一次采样。
+        # 判据复用 height_cv_max（不新造魔数）：反解身高相对失败时相差超过它，
+        # 就认为人换位置了。不设这道闸的话，失败后那几帧旧姿态会与新姿态混在
+        # 同一个窗口里，cv 持续超标 -> 界面一直喊「站定别动」（见 __init__ 注释）。
+        if self._await_change is not None:
+            ref = self._await_change
+            if abs(h_m - ref) / max(ref, 1e-6) <= self.height_cv_max:
+                self._note_block(
+                    'await_change',
+                    f'上次失败时的反解身高是 {ref:.2f} m，本帧 {h_m:.2f} m，'
+                    f'相差不足 {self.height_cv_max * 100:.0f}% —— '
+                    f'换个站位/距离（走近或退后）再站定，旧窗口已经清空')
+                return
+            # 确实变了 -> 解除等待，之后的帧开始干净的一次
+            self._await_change = None
 
         self._samples.append({'t': now, 'h': h_m, 'w': w_m,
                               'hist': hist, 'emb': embedding})
+        self._last_block = {}       # 本帧采样成功 -> 清掉上一帧的阻塞说明
         self._trim(now)
         self._try_commit()
+
+    def _note_block(self, code: str, text: str) -> None:
+        """记下「本帧为什么没采样」。逐帧覆盖，采样成功时由调用处清空。
+
+        与 :meth:`_fail_commit` 的区别：这是**阻塞**（当前帧不合格，继续等就有
+        可能过），那是**失败**（攒够帧了但结论不合理，用户必须改变什么）。
+        界面用两种语气呈现，避免把「继续站着」和「站起来重来」混为一谈。
+        """
+        self._last_block = {'code': code, 'text': text}
 
     def _trim(self, now: float) -> None:
         """滚动窗口：只留最近 window_s 秒内的样本。"""
@@ -462,11 +640,41 @@ class PersonFeatureTracker:
         if len(self._samples) < self.commit_min_samples:
             return
         hs = np.array([s['h'] for s in self._samples])
-        if hs.std() / max(hs.mean(), 1e-6) > self.height_cv_max:
-            return                      # 窗口内身高还在抖（走动/遮挡），不提交
+        cv = hs.std() / max(hs.mean(), 1e-6)
+        if cv > self.height_cv_max:
+            # 窗口内身高还在抖（走动/遮挡）。这**不是失败**：窗口保留，
+            # 站定不动就会过 —— 所以用阻塞语气而不是失败语气。
+            self._note_block(
+                'unstable',
+                f'目标还在动（身高波动 {cv * 100:.0f}% > '
+                f'{self.height_cv_max * 100:.0f}%）—— 站定别动，程序在等稳定')
+            return
 
         h_new = float(np.median(hs))
         w_new = float(np.median([s['w'] for s in self._samples]))
+
+        # ---- 落盘前的最后一道闸（2026-09-29 新增）------------------------
+        # 为什么必须有：h_new/w_new 写进档案后会**一直**参与近场宽度法测距
+        # （ranging_width_m 取档案里的 width_m）。存错一次，此后每一帧都错，
+        # 而且不报错、看起来一切正常。宁可这次建档失败并说清原因。
+        # 判据用身高而不是肩宽打头，是因为身高的真实范围有公认区间，
+        # 而「检测框宽当肩宽」本身带系统偏差、范围更松、判别力更弱。
+        lo, hi = self.enroll_height_m
+        if not (lo <= h_new <= hi):
+            self._fail_commit(
+                'implausible_height',
+                f'反解身高 {h_new:.2f} m 不在 {lo:.2f}–{hi:.2f} m 之间'
+                f'（本次 {len(self._samples)} 帧窗口）',
+                h_ref=h_new)
+            return
+        lo, hi = self.enroll_width_m
+        if not (lo <= w_new <= hi):
+            self._fail_commit(
+                'implausible_width',
+                f'反解肩宽 {w_new:.2f} m 不在 {lo:.2f}–{hi:.2f} m 之间'
+                f'（本次 {len(self._samples)} 帧窗口）',
+                h_ref=h_new)
+            return
         hists = [s['hist'] for s in self._samples if s['hist'] is not None]
         hist_new = None
         if hists:
@@ -537,11 +745,39 @@ class PersonFeatureTracker:
             self.profiles.append(p)
             self.active = p
         self._samples = []
+        self._last_block = {}           # 提交成功 -> 清掉阻塞说明
         self._dirty = True
-        self.save()
         # 提交次数只增不减、跨会话累计。UI 记住上次的值，变大才播报一次
         # —— 这样「提示音」不会随刷新重复响，也不需要额外的状态通道。
         self._commits += 1
+        # 建档是用户明确的动作，**立刻落盘**：等下一个动作才写的话，
+        # 中途关程序就把刚建的档丢了（而用户以为已经建好了）。
+        self.save()
+
+    def _fail_commit(self, code: str, text: str, h_ref: float = None) -> None:
+        """建档复核不通过：**不写档案**，记一次失败供界面播报，并清空窗口。
+
+        为什么清空窗口：不清的话下一个 tick 会拿着同一批数据再失败一次，
+        每秒刷几十遍提示音 —— 用户会以为程序卡死了。清空后要重新攒够帧
+        才会再判，也就自然把提示降频成「每尝试一次说一次」。
+
+        ``seq`` 是给界面用的：它按序号去重，保证同一批数据只播报一次。
+
+        ``h_ref`` 是失败时窗口的反解身高中位。它被记进 ``_await_change``：
+        此后**反解身高与它相差不超过 ``height_cv_max`` 的帧一律只阻塞、不采样**
+        —— 否则用户改好姿势前那几帧旧姿态会和新姿态混进同一个窗口，
+        让界面在用户已经站对之后还继续喊「站定别动」。
+        """
+        self._samples = []
+        self._failures += 1
+        self._last_failure = {
+            'seq': self._failures,
+            'code': code,
+            'text': text,
+            'at': time.strftime('%H:%M:%S'),
+        }
+        self._await_change = float(h_ref) if h_ref else None
+        self._last_block = {}           # 失败已单独播报，阻塞说明让位
 
     def _match_active(self, hist, embedding=None) -> None:
         """决定「现在画面里的人是档案里的谁」。
@@ -669,6 +905,26 @@ class PersonFeatureTracker:
                 return True
         return False
 
+    def delete_profile(self, profile_id: str) -> bool:
+        """删除一条档案并**立刻落盘**。找不到返回 ``False``，什么都不改。
+
+        为什么要清 ``active``：它可能正指向被删的那条。留着会让后续
+        ``ranging_width_m()`` 从一个已不在库里的对象取肩宽 —— 界面看着
+        「没目标了」，测距却还在用一个被删的人的数，属于最难查的那类不一致。
+
+        删除是破坏性动作，所以这里直接 ``save()`` 而不是只置 ``_dirty``：
+        用户点了删就是删，不能等到下次别的动作才写盘。
+        """
+        for i, p in enumerate(self.profiles):
+            if p.profile_id == profile_id:
+                if self.active is p:
+                    self.active = None
+                self.profiles.pop(i)
+                self._dirty = True
+                self.save()
+                return True
+        return False
+
     def profile_label(self, p: PersonProfile) -> str:
         """下拉框里的一行文字。来源标记放在这里 —— 用户要能一眼看出
         「这条是事先登记的」还是「追踪时被动攒出来的」，两者可信度不同。"""
@@ -729,7 +985,7 @@ class PersonFeatureTracker:
             if self._samples:
                 return (f'正在建档（{len(self._samples)}/'
                         f'{self.commit_min_samples} 帧）……让目标完整入画并站定')
-            return ('人员特征：暂无档案 —— 到设置页走「建档」第三步'
+            return ('人员特征：暂无档案 —— 到「标定」页走 ③ 指纹建档'
                     '（本程序不会自动建档）')
         p = self.active
         return (f'人员特征：{p.name} 身高 {p.height_m:.2f} m / '

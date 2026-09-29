@@ -415,66 +415,6 @@ QLineEdit, QTextEdit {
                     </property>
                    </widget>
                   </item>
-                  <item>
-                   <layout class="QHBoxLayout" name="horizontalLayout_mount">
-                    <item>
-                     <widget class="QLabel" name="label_known_dist">
-                      <property name="text">
-                       <string>已知距离（m）：</string>
-                      </property>
-                      <property name="alignment">
-                       <set>Qt::AlignmentFlag::AlignCenter</set>
-                      </property>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QDoubleSpinBox" name="spin_known_dist">
-                      <property name="decimals">
-                       <number>2</number>
-                      </property>
-                      <property name="minimum">
-                       <double>0.200000000000000</double>
-                      </property>
-                      <property name="maximum">
-                       <double>50.000000000000000</double>
-                      </property>
-                      <property name="singleStep">
-                       <double>0.500000000000000</double>
-                      </property>
-                      <property name="value">
-                       <double>2.000000000000000</double>
-                      </property>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QPushButton" name="btn_mark_known">
-                      <property name="text">
-                       <string>记为采样点</string>
-                      </property>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QPushButton" name="btn_solve_mount">
-                      <property name="enabled">
-                       <bool>false</bool>
-                      </property>
-                      <property name="text">
-                       <string>求解安装参数</string>
-                      </property>
-                     </widget>
-                    </item>
-                   </layout>
-                  </item>
-                  <item>
-                   <widget class="QLabel" name="label_mount_status">
-                    <property name="text">
-                     <string>安装参数自标定：把目标摆到卷尺已知距离处、静止，点「记为采样点」。推荐 2 m / 5 m / 10 m 三点（两点无法自查错误标记）</string>
-                    </property>
-                    <property name="wordWrap">
-                     <bool>true</bool>
-                    </property>
-                   </widget>
-                  </item>
                  </layout>
                 </widget>
                </item>
@@ -1181,9 +1121,318 @@ QLineEdit, QTextEdit {
             </widget>
            </item>
            <item>
+            <widget class="QGroupBox" name="groupBox_profiles">
+             <property name="title">
+              <string>指纹档案管理（查 / 改 / 删）</string>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayout_profiles">
+              <item>
+               <widget class="QLabel" name="label_profiles_hint">
+                <property name="text">
+                 <string>建档在「标定」页第三步。这里管已建的档：选中一条可以改名或删除。删除会立刻写盘、不可撤销；若删的正是追踪目标，追踪目标会同时被取消。</string>
+                </property>
+                <property name="wordWrap">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QListWidget" name="list_profiles">
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>150</height>
+                 </size>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_profiles">
+                <item>
+                 <widget class="QPushButton" name="btn_profile_rename">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>36</height>
+                   </size>
+                  </property>
+                  <property name="text">
+                   <string>改名…</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btn_profile_delete">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>36</height>
+                   </size>
+                  </property>
+                  <property name="text">
+                   <string>删除</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btn_profile_refresh">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>36</height>
+                   </size>
+                  </property>
+                  <property name="text">
+                   <string>刷新列表</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_profile_detail">
+                <property name="text">
+                 <string>（选中一条档案，这里显示它的来源、样本量与嵌入状态）</string>
+                </property>
+                <property name="wordWrap">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_record">
+      <attribute name="title">
+       <string>录制回放</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout_rec">
+       <item>
+        <widget class="QGroupBox" name="groupBox_rec">
+         <property name="title">
+          <string>录制</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_rec1">
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_rec1">
+            <item>
+             <widget class="QPushButton" name="btn_rec_toggle">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>40</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>开始录制</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="label_rec_status">
+              <property name="text">
+               <string>空闲</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_rec_info">
+            <property name="text">
+             <string>未录制。开始后会把画面与检测/测距结果分别落盘，录制期间不阻塞主链路。</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="groupBox_play">
+         <property name="title">
+          <string>回放分析</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_play">
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_play1">
+            <item>
+             <widget class="QPushButton" name="btn_play_pick">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>40</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>选择录制</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_play_toggle">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>40</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>播放</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_play_stop">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>40</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>停止</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QSlider" name="slider_play_pos">
+              <property name="minimum">
+               <number>0</number>
+              </property>
+              <property name="maximum">
+               <number>1000</number>
+              </property>
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="orientation">
+               <enum>Qt::Orientation::Horizontal</enum>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="label_play_pos">
+              <property name="text">
+               <string>0/0</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_play_info">
+            <property name="text">
+             <string>未选择录制。回放视频轨与数据轨同步，可在下方查看测距曲线。</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="groupBox_play_plot">
+         <property name="title">
+          <string>测距曲线（录制/回放）</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_playplot">
+          <item>
+           <widget class="PlotWidget" name="plot_replay_distance" native="true"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="label_replay_summary">
+         <property name="text">
+          <string>尚无回放数据。</string>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_calib">
+      <attribute name="title">
+       <string>标定</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout_calibtab">
+       <item>
+        <widget class="QLabel" name="label_calibtab_hint">
+         <property name="text">
+          <string>标定与登记共三件，互不依赖、按需做：① 棋盘标定（内参与本机设备绑定）→ ② 采样点标定（安装高度/俯角）→ ③ 指纹建档（记住这个人）。前两件随设备做一次，第三件每换一个人做一次。三件都要看着下面的画面操作。</string>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="groupBox_calib_preview">
+         <property name="title">
+          <string>画面（带检测框与测距）</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_calibprev">
+          <item>
+           <widget class="QLabel" name="lbl_calib_view">
+            <property name="minimumSize">
+             <size>
+              <width>320</width>
+              <height>240</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>摄像头未连接</string>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>16777215</width>
+              <height>300</height>
+             </size>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignmentFlag::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QScrollArea" name="scrollArea_calib">
+         <property name="verticalScrollBarPolicy">
+          <enum>Qt::ScrollBarPolicy::ScrollBarAsNeeded</enum>
+         </property>
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="scrollAreaWidgetContents_calib">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>986</width>
+            <height>623</height>
+           </rect>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_calibinner">
+           <item>
             <widget class="QGroupBox" name="groupBox_calib">
              <property name="title">
-              <string>相机标定</string>
+              <string>① 棋盘标定（内参）</string>
              </property>
              <layout class="QVBoxLayout" name="verticalLayout_calib">
               <item>
@@ -1461,15 +1710,94 @@ QLineEdit, QTextEdit {
             </widget>
            </item>
            <item>
+            <widget class="QGroupBox" name="groupBox_mount">
+             <property name="title">
+              <string>② 采样点标定（安装参数）</string>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayout_mount">
+              <item>
+               <widget class="QLabel" name="label_mount_hint">
+                <property name="text">
+                 <string>让目标站到卷尺量好的已知距离处、静止，点「记为采样点」。推荐 2 m / 5 m / 10 m 三点（两点无法自查错误标记），然后点「求解安装参数」。</string>
+                </property>
+                <property name="wordWrap">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout_mount">
+                <item>
+                 <widget class="QLabel" name="label_known_dist">
+                  <property name="text">
+                   <string>已知距离（m）：</string>
+                  </property>
+                  <property name="alignment">
+                   <set>Qt::AlignmentFlag::AlignCenter</set>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QDoubleSpinBox" name="spin_known_dist">
+                  <property name="decimals">
+                   <number>2</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.200000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>50.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.500000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>2.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btn_mark_known">
+                  <property name="text">
+                   <string>记为采样点</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btn_solve_mount">
+                  <property name="enabled">
+                   <bool>false</bool>
+                  </property>
+                  <property name="text">
+                   <string>求解安装参数</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_mount_status">
+                <property name="text">
+                 <string>尚未采样 —— 点「记为采样点」后，这里会列出每个已记录的距离与底边像素。</string>
+                </property>
+                <property name="wordWrap">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
             <widget class="QGroupBox" name="groupBox_enroll">
              <property name="title">
-              <string>建档（第三步：让程序记住这个人）</string>
+              <string>③ 指纹建档（让程序记住这个人）</string>
              </property>
              <layout class="QVBoxLayout" name="verticalLayout_enroll">
               <item>
                <widget class="QLabel" name="label_enroll_hint">
                 <property name="text">
-                 <string>让被登记者走到画面中间（3-10 m），点「开始建档」后站定约 3 秒，攒够稳定窗口即自动记入档案。可连续给多人建档：让他走出画面，换下一个人再走进来。</string>
+                 <string>让被登记者走到画面中间（3-10 m），点「开始建档」后站定约 3 秒，攒够稳定窗口即自动记入档案。可连续给多人建档：让他走出画面，换下一个人再走进来。下面「画面」组会实时显示反解出的身高/肩宽；数值越过合理区间会直接判失败并说明原因，不会把可疑值静默写进档案。</string>
                 </property>
                 <property name="wordWrap">
                  <bool>true</bool>
@@ -1550,163 +1878,6 @@ QLineEdit, QTextEdit {
            </item>
           </layout>
          </widget>
-        </widget>
-       </item>
-      </layout>
-     </widget>
-     <widget class="QWidget" name="tab_record">
-      <attribute name="title">
-       <string>录制回放</string>
-      </attribute>
-      <layout class="QVBoxLayout" name="verticalLayout_rec">
-       <item>
-        <widget class="QGroupBox" name="groupBox_rec">
-         <property name="title">
-          <string>录制</string>
-         </property>
-         <layout class="QVBoxLayout" name="verticalLayout_rec1">
-          <item>
-           <layout class="QHBoxLayout" name="horizontalLayout_rec1">
-            <item>
-             <widget class="QPushButton" name="btn_rec_toggle">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>40</height>
-               </size>
-              </property>
-              <property name="text">
-               <string>开始录制</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLabel" name="label_rec_status">
-              <property name="text">
-               <string>空闲</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <widget class="QLabel" name="label_rec_info">
-            <property name="text">
-             <string>未录制。开始后会把画面与检测/测距结果分别落盘，录制期间不阻塞主链路。</string>
-            </property>
-            <property name="wordWrap">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QGroupBox" name="groupBox_play">
-         <property name="title">
-          <string>回放分析</string>
-         </property>
-         <layout class="QVBoxLayout" name="verticalLayout_play">
-          <item>
-           <layout class="QHBoxLayout" name="horizontalLayout_play1">
-            <item>
-             <widget class="QPushButton" name="btn_play_pick">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>40</height>
-               </size>
-              </property>
-              <property name="text">
-               <string>选择录制</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="btn_play_toggle">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>40</height>
-               </size>
-              </property>
-              <property name="text">
-               <string>播放</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="btn_play_stop">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>40</height>
-               </size>
-              </property>
-              <property name="text">
-               <string>停止</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QSlider" name="slider_play_pos">
-              <property name="minimum">
-               <number>0</number>
-              </property>
-              <property name="maximum">
-               <number>1000</number>
-              </property>
-              <property name="value">
-               <number>0</number>
-              </property>
-              <property name="orientation">
-               <enum>Qt::Orientation::Horizontal</enum>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QLabel" name="label_play_pos">
-              <property name="text">
-               <string>0/0</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-          <item>
-           <widget class="QLabel" name="label_play_info">
-            <property name="text">
-             <string>未选择录制。回放视频轨与数据轨同步，可在下方查看测距曲线。</string>
-            </property>
-            <property name="wordWrap">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QGroupBox" name="groupBox_play_plot">
-         <property name="title">
-          <string>测距曲线（录制/回放）</string>
-         </property>
-         <layout class="QVBoxLayout" name="verticalLayout_playplot">
-          <item>
-           <widget class="PlotWidget" name="plot_replay_distance" native="true"/>
-          </item>
-         </layout>
-        </widget>
-       </item>
-       <item>
-        <widget class="QLabel" name="label_replay_summary">
-         <property name="text">
-          <string>尚无回放数据。</string>
-         </property>
-         <property name="wordWrap">
-          <bool>true</bool>
-         </property>
         </widget>
        </item>
       </layout>

@@ -40,7 +40,7 @@ import time
 # 所以宁可让它们不可比（跳过），也不产出无意义的分数。
 _REID_TAG = os.path.splitext(os.path.basename(REID_MODEL_PATH))[0]
 
-# 「已建档：xxx」这类一次性结论在设置页大字上保留的秒数。保护期内实时进度
+# 「已建档：xxx」这类一次性结论在标定页大字上保留的秒数。保护期内实时进度
 # 刷新的**大字**不覆盖它 —— 否则刚响完提示音，下一次节流刷新（≤5 帧）就把
 # 结论冲掉，用户根本看不到（verify_enroll_wiring 的 D/E 两项抓到过）。
 _ENROLL_BIG_HOLD_S = 5.0
@@ -162,6 +162,10 @@ class MainWindow(QWidget, Ui_Form):
         self.frame_counter = 0
         self.inference_interval = 3  # 每5帧推理一次（0,1,2,3,4,5...）
         self.last_detection=None
+        # 本帧「检测到的这个人不是追踪目标」的说明（None = 没这回事）。
+        # 画面叠加与距离读数共用它：不是他 -> 不画框、不出数（2026-09-29 用户要求
+        # 「没认出就把这个陌生人的检测框也扔掉，距离显示不可测，下面标注原因」）。
+        self._identity_reject_note = None
         self.is_loading_model=False
         # 标定状态：不采集时 calibrator 为 None，避免误采集普通帧
         self.calibrator = None
@@ -219,7 +223,7 @@ class MainWindow(QWidget, Ui_Form):
         self._speed_gate = SpeedGate()
         self._last_profile_key = ''     # 防止建档提示刷屏
         # ------------------------------------------------------------------
-        # 建档（CHARTER v1.4「范围内的」建档条：独立第三步，收在设置页）
+        # 建档（CHARTER v1.4「范围内的」建档条：独立第三步，收在标定页）
         # ------------------------------------------------------------------
         # 与 reid_probe **各持一个 embedder**，不共用：
         #   · reid_probe 的在后台线程、与录制同开同关、只落盘；
@@ -228,6 +232,7 @@ class MainWindow(QWidget, Ui_Form):
         self._enroll_embedder = None
         self._enroll_ui_tick = 0        # 建档状态刷新节流（每 N 帧刷一次）
         self._enroll_commits_seen = 0   # 已播报过的提交次数（提示音去重，不重复响）
+        self._enroll_failures_seen = 0  # 已播报过的建档失败次数（同上，另一条通道）
         self._enroll_last_error = ''
         # 「已建档：xxx」是一次性结论，给它一个保护期：期间实时进度刷新
         # 不许覆盖大字，否则结论立刻被冲掉（见 _ENROLL_BIG_HOLD_S 的注释）。
@@ -404,16 +409,21 @@ class MainWindow(QWidget, Ui_Form):
         self.combo_hardware_accel.setCurrentText(self.global_params.hardware_accel)
         #推理结果
         self.lcd_credibility.display(self.global_params.credibility)
-        self.label_target_category.setText(self.global_params.target_category)
+        #「目标类别」这一行有追踪目标时显示的是**身份**，不是类别名（见
+        # target_category_text）。启动时也要按同一条规则写，否则重启后直到
+        # 第一帧检测到来之前，这一行还停在 .ui 里写死的「--」。
+        self.refresh_target_category_label()
         #相机标定：先认「本机是哪台相机」，再按设备取内参（见 load_calibration）
         self.load_calibration()
         #安装参数（相机高度 + 俯仰角）：与内参同理，落盘后启动即回填
         self.load_mount_params_ui()
         self.refresh_calib_widgets()
         self.refresh_camera_widgets()
-        # 建档状态（设置页第三步）：启动时就把「档案库几条」如实显示出来，
+        # 建档状态（标定页 ③）：启动时就把「档案库几条」如实显示出来，
         # 而不是留一句写死的「未开始」。
         self._refresh_enroll_status()
+        # 指纹档案管理列表（设置页）：启动时填一次（内部会一并刷新追踪目标下拉）
+        self.refresh_profiles_list()
     
     #摄像头线程启动
     def async_init_camera(self):
@@ -719,7 +729,7 @@ class MainWindow(QWidget, Ui_Form):
         self.slider_base_width.valueChanged.connect(lambda v:self.label_base_width.setText(f'{v}px'))
         self.spin_pitch_deg.valueChanged.connect(self.on_pitch_changed)
         self.spin_camera_height.valueChanged.connect(self.on_camera_height_changed)
-        # 安装参数自标定（监视页）：由「已知距离 + 框底边像素」反解 (H, 俯仰角)
+        # 安装参数自标定（标定页 ②，2026-09-29 从监视页搬来）
         self.btn_mark_known.clicked.connect(self.on_mark_known_clicked)
         self.btn_solve_mount.clicked.connect(self.on_solve_mount_clicked)
         # 追踪目标选择（设置页，CHARTER v1.4「建档 + 追踪目标选择」）：
@@ -732,12 +742,20 @@ class MainWindow(QWidget, Ui_Form):
         self.btn_rename_track_target.clicked.connect(
             self.on_rename_track_target_clicked)
 
-        # 建档（设置页第三步，CHARTER v1.4）：开始 / 结束建档会话。
+        # 指纹档案管理（设置页，2026-09-29 新增）：查（列表 + 详情）/ 改（改名）/ 删。
+        # 与上面「追踪目标选择」的分工：那边选「跟谁」，这边管档案本身的增删改。
+        self.list_profiles.currentRowChanged.connect(self.on_profile_row_changed)
+        self.btn_profile_rename.clicked.connect(self.on_profile_rename_clicked)
+        self.btn_profile_delete.clicked.connect(self.on_profile_delete_clicked)
+        self.btn_profile_refresh.clicked.connect(
+            lambda _checked=False: self.refresh_profiles_list())
+
+        # 建档（标定页 ③，CHARTER v1.4）：开始 / 结束建档会话。
         # 「采样点距离」手填框**不接信号** —— 检测回调每帧现读它的值，
         # 用户改了立刻生效，不需要额外的同步或重算。
         self.btn_enroll_toggle.clicked.connect(self.on_enroll_toggle_clicked)
 
-        # 摄像头设备（设置页）：像蓝牙那样按设备记标定
+        # 摄像头设备（标定页 ①）：像蓝牙那样按设备记标定
         self.combo_camera_device.currentIndexChanged.connect(
             self.on_camera_device_chosen)
         self.btn_camera_bind.clicked.connect(self.on_bind_camera_clicked)
@@ -917,7 +935,7 @@ class MainWindow(QWidget, Ui_Form):
         return str(combo.currentData() or '')
 
     def refresh_camera_widgets(self):
-        """把「本机摄像头」与「本设备的标定状态」刷到设置页。
+        """把「本机摄像头」与「本设备的标定状态」刷到标定页。
 
         ⚠️ 下拉框的语义必须说准：程序固定打开**索引 0**，所以选中项表达的是
         「我确认索引 0 就是这台」，而不是「选一下就能换相机」—— Windows 上取不到
@@ -1071,7 +1089,7 @@ class MainWindow(QWidget, Ui_Form):
             f'这台相机（{name}）还没有可用的内参，测距不可用'
             f'（程序不会给出猜测值）。\n\n'
             f'原因：{decision.status}\n\n'
-            f'要做什么：切到「设置」页 →「相机标定」→ 把棋盘格放进画面 →\n'
+            f'要做什么：切到「标定」页 → ① 棋盘标定组 → 把棋盘格放进画面 →\n'
             f'点「开始采集」（采够 10 帧）→ 点「求解并保存」。\n\n'
             f'标定一次即可：结果会按这台设备记住，以后插回来直接可用。')
 
@@ -1084,7 +1102,7 @@ class MainWindow(QWidget, Ui_Form):
 
 
     def load_mount_params_ui(self):
-        """把落盘的安装参数（相机高度 + 俯仰角）回填到设置页，并立即生效。
+        """把落盘的安装参数（相机高度 + 俯仰角）回填到标定页，并立即生效。
 
         为什么要有这一步
         ---------------
@@ -1499,7 +1517,7 @@ class MainWindow(QWidget, Ui_Form):
             QMessageBox.warning(
                 self, '安装参数自标定',
                 '相机还没标定，没有可用内参，无法解算安装参数。\n'
-                '请先在「设置 → 相机标定」里完成棋盘格标定。')
+                '请先在「标定」页 ① 棋盘标定组里完成棋盘格标定。')
             return
         if self.global_params.detection_height <= 0:
             QMessageBox.warning(
@@ -1554,7 +1572,7 @@ class MainWindow(QWidget, Ui_Form):
         self._update_mount_status()
 
     def _update_mount_status(self):
-        """把已记录的采样点回显到监视页（含还差几个、能不能求解）。"""
+        """把已记录的采样点回显到「标定」页 ② 组的粗体状态行（含还差几个、能不能求解）。"""
         marks = self._mount_marks
         text = '已记录采样点：' + '、'.join(
             f"距离 {m['dist']:.2f} m → 底边 {m['v']:.0f} px"
@@ -1571,7 +1589,7 @@ class MainWindow(QWidget, Ui_Form):
 
     @Slot()
     def on_solve_mount_clicked(self):
-        """由采样点反解 (相机安装高度, 俯仰角)，并写回设置页立即生效。"""
+        """由采样点反解 (相机安装高度, 俯仰角)，并写回标定页立即生效。"""
         intr = self.global_params.intrinsics
         if intr is None or not intr.is_valid():
             QMessageBox.warning(self, '安装参数自标定',
@@ -1586,7 +1604,7 @@ class MainWindow(QWidget, Ui_Form):
                 f'{sol.reason}\n\n已记录的采样点保留，可补采后重试。')
             return
 
-        # 写回设置页：与手工填写走**同一条通路**（控件 valueChanged -> 重建
+        # 写回标定页：与手工填写走**同一条通路**（控件 valueChanged -> 重建
         # 测距配置）。控件精度（高度 2 位、俯仰角 1 位）会截断解出的值，
         # 所以按截断后的值再显式同步一次，避免"显示的值"与"实际生效的值"不一致。
         self.spin_camera_height.setValue(round(sol.camera_height, 2))
@@ -1612,7 +1630,7 @@ class MainWindow(QWidget, Ui_Form):
             f'估计精度（按底边定位误差 1 px 估计）：\n'
             f'    相机高度 ±{sol.sigma_height * 100:.1f} cm\n'
             f'    俯仰角   ±{sol.sigma_pitch:.2f}°\n\n'
-            f'已写入「设置 → 相机标定」：安装高度 {h_applied:.2f} m、'
+            f'已写入「标定」页 ② 组的安装参数：安装高度 {h_applied:.2f} m、'
             f'俯仰角 {pitch_applied:.1f}°，已立即生效。\n'
             f'按这两个数，10 m 处由俯仰角误差贡献的距离误差约 {sens:.1f}%。')
 
@@ -1928,6 +1946,9 @@ class MainWindow(QWidget, Ui_Form):
             self.last_detection = None
             self.global_params.distance = None
 
+        # 回放路径没有「认人」这回事（重识别在本项目里只记录、不在回放里判定），
+        # 所以身份拦截必须**显式关掉** —— 否则会把实时画面留下的红字带进回放。
+        self._identity_reject_note = None
         self._display_frame(frame)
 
         if not self._replay_seeking:
@@ -1941,25 +1962,64 @@ class MainWindow(QWidget, Ui_Form):
     def _display_frame(self, frame_bgr):
         """把一帧 BGR 画到界面上（实时与回放共用）。
 
-        懒绘制（2026-09-26 用户要求）：画面控件在监控页，不在监控页时
-        只保存帧引用、跳过 cvtColor/copy/两次 setPixmap（SmoothTransformation
-        缩放是 UI 大头），切回监控页时由 on_tab_change 用最近一帧补画。
+        懒绘制（2026-09-26 用户要求）：画面控件不在当前页时只保存帧引用、
+        跳过 cvtColor/copy/两次 setPixmap（SmoothTransformation 缩放是 UI 大头），
+        切回时由 on_tab_change 用最近一帧补画。
         检测/测距/录制等数据链路不经过这里，后台照常运转。
+
+        2026-09-29：新增「标定」页预览。采样点标定与建档都**必须看着画面**
+        （要确认目标完整入画、人确实站在卷尺那个点上），所以这两组控件从
+        监视页搬进标定页之后，新页必须自带一块画面 —— 否则等于把功能搬瘸了。
+
+        页判定用**控件身份**，不用下标也不用中文标题：下标插页就错位；标题
+        在 Designer 里改一个字就静默失效（本页实际叫「监视」，而代码里曾按
+        「监控」比对 —— 一旦改成读 tabText 判断，监视页会直接不再刷新画面，
+        且不报错）。
         """
         self._last_display_bgr = frame_bgr
-        if self.tabWidget.currentIndex() != 0:
+        page = self.tabWidget.currentWidget()
+        if page is not self.tab_monitor and page is not self.tab_calib:
             return
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        h, w, ch = frame_rgb.shape
-        qt_img = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
-        self.lbl_original.setPixmap(QPixmap.fromImage(qt_img).scaled(
-            self.lbl_original.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        draw_img = self._draw_overlay(frame_rgb)
 
+        if page is self.tab_monitor:
+            h, w, ch = frame_rgb.shape
+            qt_img = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
+            self.lbl_original.setPixmap(QPixmap.fromImage(qt_img).scaled(
+                self.lbl_original.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            target_lbl = self.lbl_process
+        else:
+            target_lbl = self.lbl_calib_view
+
+        h2, w2, ch2 = draw_img.shape
+        qt_img2 = QImage(draw_img.data, w2, h2, ch2 * w2, QImage.Format_RGB888)
+        target_lbl.setPixmap(QPixmap.fromImage(qt_img2).scaled(
+            target_lbl.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def _draw_overlay(self, frame_rgb):
+        """在 RGB 帧副本上画检测框与读数，返回副本。**不改动入参**。
+
+        三种状态（互斥，且与「出不出数」同源 —— 画面与读数不能各说各话）：
+
+        ① 检测到的**不是**追踪目标：不画框。画上去等于向用户宣称「这就是他」，
+           而距离那一侧已经按「不可测」处理了，两边必须一致（2026-09-29 用户：
+           「没认出就把这个陌生人的检测框也扔掉」）。
+        ② 有可用目标：画框 + 类别/置信度/距离。
+        ③ 本帧没有目标：写「No Target」。
+        """
         draw_img = frame_rgb.copy()
+        if self._identity_reject_note:
+            # 字必须是 ASCII：cv2.putText 只认 Hershey 字库，写中文会渲染成一串问号。
+            # ⚠️ 这里是 **RGB** 缓冲（入参已由 BGR 转过），(255,165,0) 才是橙；
+            #    写成 (0,165,255) 会变蓝。（下面 'No Target' 那行是 BGR 口径的
+            #    遗留写法，实际显示为蓝 —— 本轮不动它，改它属于另一件事。）
+            cv2.putText(draw_img, 'Not Target', (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
         # 画框判据与目标过滤同源（2026-09-26：原先写死 >=0.3，置信度 0.65 的
         # 误检在阈值调到 0.7 后照样画框 —— 滑块形同虚设的直接原因之一）。
         # 回放路径的 last_detection 也走这里，行为一致：当前阈值就是显示过滤器。
-        if self.last_detection and self.last_detection.get('confidence', 0) \
+        elif self.last_detection and self.last_detection.get('confidence', 0) \
                 >= self.global_params.confidence_thres:
             target = self.last_detection
             x, y = target['x'], target['y']
@@ -1982,11 +2042,7 @@ class MainWindow(QWidget, Ui_Form):
         else:
             cv2.putText(draw_img, 'No Target', (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-        h2, w2, ch2 = draw_img.shape
-        qt_img2 = QImage(draw_img.data, w2, h2, ch2 * w2, QImage.Format_RGB888)
-        self.lbl_process.setPixmap(QPixmap.fromImage(qt_img2).scaled(
-            self.lbl_process.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        return draw_img
 
     @Slot(int)
     def on_play_seek(self, value):
@@ -2201,8 +2257,13 @@ class MainWindow(QWidget, Ui_Form):
      
     #界面交互
     def _replay_tab_visible(self):
-        """回放页（tab 3）当前是否可见 —— 懒绘制开关。"""
-        return self.tabWidget.currentIndex() == 3
+        """回放页当前是否可见 —— 懒绘制开关。
+
+        同 :meth:`_display_frame`：按**控件身份**判断。原先写死
+        ``currentIndex() == 3``，本次插页插在末尾所以侥幸没坏，
+        但只要以后在它前面插一页就会静默判错页。
+        """
+        return self.tabWidget.currentWidget() is self.tab_record
 
     def _repaint_replay_curve(self):
         """切回回放页时把曲线数据一次性刷到图上（懒绘制补齐）。
@@ -2220,16 +2281,22 @@ class MainWindow(QWidget, Ui_Form):
 
     @Slot(int)
     def on_tab_change(self,index):
-        tab_name=['监控','深度分析','设置','录制回放']
-        currebt_tab=tab_name[index]
-        print(f"当前选项卡：{currebt_tab}")
-        if currebt_tab=='监控':
+        # 用**控件身份**判断当前页（2026-09-29）。原先用硬编码下标表
+        # tab_name=['监控','深度分析','设置','录制回放']，加一页直接 IndexError；
+        # 一度改成读 tabText，又踩到「表里写『监控』、标题其实是『监视』」的
+        # 漂移 —— 监视页会静默不再刷新画面。控件对象两个坑都不怕。
+        page = self.tabWidget.widget(index)
+        print(f"当前选项卡：{self.tabWidget.tabText(index)}")
+        if page is self.tab_monitor or page is self.tab_calib:
             # 懒绘制补齐：后台期间画面没画，切回来用最近一帧补上
             # （last_detection / global_params 的状态一直在更新，补画的
             #  框与读数就是最新状态，不是过期画面）
             if self._last_display_bgr is not None:
                 self._display_frame(self._last_display_bgr)
-        elif currebt_tab=='深度分析':
+            if page is self.tab_calib:
+                # 建档的大字、匹配行、阻塞原因都在标定页，切过来要按最新状态重画
+                self._refresh_enroll_status()
+        elif page is self.tab_analysis:
             self.init_analysis_plots()
             if not self.analysis_timer.isActive():
                 self.analysis_timer.start()
@@ -2244,13 +2311,12 @@ class MainWindow(QWidget, Ui_Form):
         # 这正是"回放遇到大范围移动会卡一下"的主因之一。
         if self.analysis_timer.isActive():
             self.analysis_timer.stop()
-        if currebt_tab=='设置':
+        if page is self.tab_setting:
             self.refresh_calib_widgets()
             self.refresh_camera_widgets()
-            # 建档状态：切回设置页时用最新数据重画 —— 建档进度与匹配行
-            # 在别的页也可能变了，靠检测回调里的节流刷新会刚好错过。
-            self._refresh_enroll_status()
-        elif currebt_tab=='录制回放':
+            # 档案管理列表：切回来重画（建档、删除、改名都可能发生在别的页）
+            self.refresh_profiles_list()
+        elif page is self.tab_record:
             # 懒绘制补齐：后台期间曲线只记数据没画图，切回来全量刷一次
             self._repaint_replay_curve()
             if self.replayer is not None:
@@ -2394,8 +2460,245 @@ class MainWindow(QWidget, Ui_Form):
                 self.status_bar.showMessage(f'加载标签失败：{str(e)}', 5000)
                 
     # ------------------------------------------------------------------
+    # 指纹档案管理（设置页，2026-09-29 新增：查 / 改 / 删）
+    # ------------------------------------------------------------------
+    # 与「追踪目标选择」的分工：那边选「跟谁」，这边管档案本身的增删改。
+    # 删除走二次确认 —— 它立刻写盘、不可撤销，且删掉的是「重新站一次才能
+    # 再建回来」的东西（档案里存着嵌入向量，重建要重新站定采样）。
+    def refresh_profiles_list(self):
+        """把档案库重填进列表，并同步详情与按钮可用性。
+
+        重填期间屏蔽 ``currentRowChanged``：``clear()/addItem()`` 会先产生
+        「-1 行」再产生「0 行」两个瞬态选中，不屏蔽的话详情区会闪，
+        而且会把用户刚选的行重置掉。
+        选中项按 ``profile_id`` 还原，而不是按下标 —— 删除一条后下标会整体位移。
+        """
+        lst = self.list_profiles
+        keep = self._selected_profile_id()
+        lst.blockSignals(True)
+        try:
+            lst.clear()
+            for p in self._person_tracker.profiles:
+                lst.addItem(self._profile_row_text(p))
+                item = lst.item(lst.count() - 1)
+                item.setData(Qt.UserRole, p.profile_id)
+                item.setToolTip(self._person_tracker.profile_tooltip(p))
+            if keep:
+                row = next((i for i in range(lst.count())
+                            if lst.item(i).data(Qt.UserRole) == keep), -1)
+                if row >= 0:
+                    lst.setCurrentRow(row)
+        finally:
+            lst.blockSignals(False)
+
+        if lst.count() == 0:
+            self.label_profile_detail.setText(
+                '档案库为空。到「标定」页第三步「指纹建档」让被登记者站一次。')
+            self.btn_profile_rename.setEnabled(False)
+            self.btn_profile_delete.setEnabled(False)
+        else:
+            if lst.currentRow() < 0:
+                lst.setCurrentRow(0)
+            self.on_profile_row_changed(lst.currentRow())
+        # 「追踪目标选择」下拉与这份列表同源，一起刷新 —— 否则删掉当前追踪
+        # 目标后，下拉里还留着一个已经不存在的选项。
+        self.refresh_track_target_combo()
+
+    def _profile_row_text(self, p) -> str:
+        """列表里的一行。★ 标出追踪目标，嵌入有无也写出来 ——
+        「这条档案能不能认人」取决于有没有嵌入，不该藏在详情里。"""
+        mark = '★' if p.is_track_target else '　'
+        emb = '嵌入✓' if p.embedding else '无嵌入'
+        return (f'{mark} {p.name}　身高 {p.height_m:.2f} m / 肩宽 {p.width_m:.2f} m'
+                f'　{emb}')
+
+    def _selected_profile_id(self) -> str:
+        lst = self.list_profiles
+        row = lst.currentRow()
+        if row < 0 or row >= lst.count():
+            return ''
+        return str(lst.item(row).data(Qt.UserRole) or '')
+
+    def _find_profile(self, profile_id):
+        for p in self._person_tracker.profiles:
+            if p.profile_id == profile_id:
+                return p
+        return None
+
+    @Slot(int)
+    def on_profile_row_changed(self, row: int):
+        """选中一条 -> 在下方显示它的来历（凭什么信这条档案）。"""
+        p = self._find_profile(self._selected_profile_id())
+        has = p is not None
+        self.btn_profile_rename.setEnabled(has)
+        self.btn_profile_delete.setEnabled(has)
+        if not has:
+            self.label_profile_detail.setText('（未选中档案）')
+            return
+        emb = (f'{len(p.embedding)} 维' if p.embedding else '无 —— 匹配会退回直方图')
+        origin = ('主动建档' if p.is_enrolled else '自动（v1 老档案，已不再自动建档）')
+        lines = [
+            f'档案 ID：{p.profile_id}',
+            f'来源：{origin}　建档于 {p.enrolled_at or "—"}　最近更新 {p.updated_at or "—"}',
+            f'样本：{p.n_updates} 个稳定窗口（每窗口 ≥12 帧、身高 CV ≤5%）',
+            f'外观嵌入：{emb}　模型 {p.emb_model or "—"}',
+            f'追踪目标：{"是" if p.is_track_target else "否"}',
+        ]
+        if p.height_m < self._person_tracker.enroll_height_m[0] or \
+                p.height_m > self._person_tracker.enroll_height_m[1]:
+            lo, hi = self._person_tracker.enroll_height_m
+            lines.append(f'⚠️ 身高 {p.height_m:.2f} m 不在 {lo:.2f}–{hi:.2f} m 内'
+                         f'（本档案建于加这道闸之前）—— 建议删掉重新建档')
+        if p.source:
+            lines.append(f'备注：{p.source}')
+        self.label_profile_detail.setText('\n'.join(lines))
+
+    @Slot()
+    def on_profile_rename_clicked(self):
+        p = self._find_profile(self._selected_profile_id())
+        if p is None:
+            return
+        new_name, ok = QInputDialog.getText(
+            self, '重命名指纹',
+            f'给这条指纹起个名字（当前：{p.name}）。\n留空 = 恢复显示档案 ID。',
+            text=p.display_name)
+        if not ok:
+            return
+        if not self._person_tracker.rename_profile(p.profile_id, new_name):
+            QMessageBox.warning(self, '重命名失败', f'档案 {p.profile_id} 不在库里。')
+            return
+        self.status_bar.showMessage(f'已改名：{p.name}', 4000)
+        self.refresh_profiles_list()
+
+    @Slot()
+    def on_profile_delete_clicked(self):
+        p = self._find_profile(self._selected_profile_id())
+        if p is None:
+            return
+        extra = ''
+        if p.is_track_target:
+            extra = ('\n\n⚠️ 它是当前的追踪目标 —— 删除会同时取消「追踪目标」指定，'
+                     '近场宽度法将回退默认肩宽。')
+        ans = QMessageBox.question(
+            self, '删除这条指纹档案？',
+            f'将删除：{p.name}\n'
+            f'身高 {p.height_m:.2f} m / 肩宽 {p.width_m:.2f} m　'
+            f'档案 ID：{p.profile_id}{extra}\n\n'
+            f'删除会**立刻写盘、不可撤销** —— 之后要重新站到镜头前建档才能恢复。',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        name = p.name
+        if not self._person_tracker.delete_profile(p.profile_id):
+            QMessageBox.warning(self, '删除失败', f'档案 {p.profile_id} 不在库里。')
+            return
+        self.status_bar.showMessage(f'已删除档案：{name}', 5000)
+        self.refresh_profiles_list()
+
+    # ------------------------------------------------------------------
     # 追踪目标选择（CHARTER v1.4「建档 + 追踪目标选择」）
     # ------------------------------------------------------------------
+    def target_category_text(self) -> str:
+        """监视页「目标类别」该显示什么（2026-09-29 用户要求）。
+
+        用户原话：「没有追踪目标时显示类别，有追踪目标时显示身份，这样也可以
+        判断追踪是否生效」—— 所以这一行有目标时就答**是谁**，没有目标时才
+        退回类别名（CHARTER v1.4 全链路唯一类别是「行人」）。
+
+        为什么要把「追踪中 / 本帧未认出 / 画面无人」三种状态都摆出来：
+        CHARTER「匹配分级」要求高置信锁定、中置信标「存疑」、低置信报丢失。
+        这里只给最粗的一档「是不是他」，够用户判断**追踪有没有生效**；
+        细分的分数与门槛在标定页 ③ 组的匹配行（``match_line()``）里。
+
+        匹配状态取自 ``_person_tracker.active``，是**上一帧**的结论（匹配在
+        本帧 observe() 里才更新，而本标签在测距之前就写了）。差一帧
+        （30 FPS 下 33 ms）不影响人眼判断，也避免了为一句话去重排整条链路。
+        """
+        tgt = self._person_tracker.track_target()
+        if tgt is None:
+            return self.global_params.target_category or '未知'
+        if self.global_params.detection_height <= 0:
+            return f'{tgt.name}（画面无人）'
+        active = self._person_tracker.active
+        if active is not None and active.profile_id == tgt.profile_id:
+            return f'{tgt.name}（追踪中）'
+        return f'{tgt.name}（本帧未认出）'
+
+    def refresh_target_category_label(self):
+        """把上面那句刷进监视页。UI 刷新点统一收在这里，免得文案两处漂移。
+
+        **变了才 setText**：本函数每帧都会被调到（有过目标的分支与没过目标的分支
+        各一次），而无变化时的 setText 会白白触发一次 QLabel 重绘。
+        """
+        txt = self.target_category_text()
+        if txt != self.label_target_category.text():
+            self.label_target_category.setText(txt)
+
+    def _set_match_line(self, text):
+        """把匹配行写进「标定」页 ③ 组。**变了才 setText**（理由同上）。
+
+        这行原本只在「检测到人」的分支里刷新，没检测到人时**停在上一次的
+        数值上**。2026-09-29 用户指着空画面读「整个画面就算没人也有 0.44」——
+        那个 0.44 是上一帧的残留，不是当场算出来的。残留值比不显示更坏：
+        它会让人据此判断「阈值是不是太松」，而那个判断本身建立在假数据上。
+        """
+        if text != self.label_enroll_match.text():
+            self.label_enroll_match.setText(text)
+
+    def _identity_reject_reason(self):
+        """本帧画面里的人**不是**追踪目标 -> 返回可直接显示的原因；否则 None。
+
+        CHARTER「范围内的」第 4 条要求「只对被追踪的这一个出数」（原文：「匹配
+        分级：高置信锁定并测距 / 中置信继续跟随但标『存疑』且 TTC 不出数 /
+        低置信报『目标丢失』；重识别缓冲仅对**被追踪的这一个个体**生效」）。
+        ``PersonFeatureTracker.ranging_width_m()`` 的 ⚠️ 也把这条边界写明了：
+        「当前帧里的目标是不是追踪目标本人、该不该出数，由上层负责，不在这里
+        拦」—— 本函数就是那个上层。
+
+        拦下去的代价（先摆明，免得以为是白拦）：同一个人跨会话本来就只有约
+        94% 的帧过门槛（session-20260929-131735 实测 234/249 = 94.0%，当天
+        同一段连续命中 207 帧），被拦的帧距离会掉到「不可测」。这是用户明确
+        要求的行为 —— 宁可不出数，也不拿别人的框出数。真要放宽，唯一正确的
+        做法是**用真人数据标定门槛**，不是在这里开口子。
+
+        什么时候**不**拦（每一条都有具体理由，少一条就会误伤）：
+        - 没指定追踪目标 —— 不存在「是不是他」这回事，行为与改造前完全一致；
+        - 正在建档会话里 —— 刚开档的人当然还匹配不上任何档案，拦掉就没法建档；
+        - 正在记采样点标定 —— 自标定观测的是**框底边像素**，与画面里是谁无关
+          （用户会把目标摆到卷尺已知距离处，那个人不一定已建档）；
+        - 本帧**没算过**认人 —— 「没算」（不是人 / 相机未标定 / 框无效）不等于
+          「算出来不是他」，拦下去会把未标定或空画面的整屏都黑掉；
+        - 走的是**直方图路线**（档案没有可比嵌入 / 嵌入模型缺失）—— 那条路是
+          「模型缺失时行为仍可解释」的兜底，实测命中率 **0%**（session-20260929-131735
+          250 帧全未过 0.55 门槛，中位 0.283），拿它当「不是他」的依据等于把所有
+          画面一律拦掉。判据只认 ``source == 'embedding'``；
+        - 库里**没有一条可比档案**（例如换过嵌入模型的老档案）—— 认人这条路
+          根本没跑通，不能说「不是他」，否则老档案一律全黑。
+        """
+        t = self._person_tracker
+        tgt = t.track_target()
+        if tgt is None or t.enrolling or self._marking:
+            return None
+        fi = t.frame_identity()
+        if not fi.get('computed') or int(fi.get('comparable', 0) or 0) <= 0:
+            return None
+        if fi.get('source') != 'embedding':
+            return None
+        if fi.get('matched') is tgt:
+            return None
+
+        matched = fi.get('matched')
+        score, thr = fi.get('score'), fi.get('threshold')
+        if matched is not None:
+            head = f'本帧匹配到的是「{matched.name}」，不是追踪目标「{tgt.name}」'
+        elif score is None or thr is None:
+            head = f'本帧这个人和追踪目标「{tgt.name}」对不上'
+        else:
+            head = (f'本帧这个人和追踪目标「{tgt.name}」对不上'
+                    f'（相似度 {score:.3f} < 门槛 {thr:.3f}）')
+        return f'{head} —— 已丢弃这个检测框，距离按不可测'
+
     def refresh_track_target_combo(self):
         """用指纹档案列表重填「追踪目标选择」下拉。
 
@@ -2437,6 +2740,9 @@ class MainWindow(QWidget, Ui_Form):
                 combo.itemData(combo.currentIndex(), Qt.UserRole) or '')
         finally:
             combo.blockSignals(False)
+        # 下拉重填后「追谁」可能变了（档案被删、或用户改了指定），监视页那行
+        # 跟着走 —— 它显示的可能是身份而不是类别名。
+        self.refresh_target_category_label()
 
     def on_track_target_changed(self, index):
         """用户在下拉里换了追踪目标：写进档案（单选）并落盘。
@@ -2449,6 +2755,7 @@ class MainWindow(QWidget, Ui_Form):
         if not pid:
             self._person_tracker.set_track_target('')
             self.global_params.track_target_id = ''
+            self.refresh_target_category_label()
             self.status_bar.showMessage('已取消追踪目标：仅跟随本帧匹配到的人', 5000)
             return
         hit = self._person_tracker.set_track_target(pid)
@@ -2458,6 +2765,8 @@ class MainWindow(QWidget, Ui_Form):
             self.refresh_track_target_combo()
             return
         self.global_params.track_target_id = pid
+        # 立刻反映到监视页 —— 不让用户以为「选了没生效、得等下一帧」
+        self.refresh_target_category_label()
         self.status_bar.showMessage(
             f'追踪目标已指定：{hit.name}（身高 {hit.height_m:.2f} m / '
             f'肩宽 {hit.width_m:.2f} m）—— 近场宽度法改用该肩宽', 6000)
@@ -2485,7 +2794,7 @@ class MainWindow(QWidget, Ui_Form):
             f'指纹已重命名：{old} → {self.combo_track_target.currentText()}', 5000)
 
     # ------------------------------------------------------------------
-    # 建档（CHARTER v1.4「范围内的」建档条：独立第三步，收在设置页）
+    # 建档（CHARTER v1.4「范围内的」建档条：独立第三步，收在标定页）
     #
     # 为什么必须有这个入口：``PersonFeatureTracker.observe()`` 的被动路径
     # **只认人、不采样、不落盘** —— 也就是说，没有这条链路就永远不会有档案，
@@ -2514,7 +2823,7 @@ class MainWindow(QWidget, Ui_Form):
                 self, '还不能建档',
                 '采样点距离留 0 时，身高/肩宽要靠测距值反解，而当前内参不可用。\n\n'
                 '两条路选一条：\n'
-                '  1. 先在本页「相机标定」完成内参与安装参数；\n'
+                '  1. 先在本页上方「① 棋盘标定」与「② 采样点标定」做完；\n'
                 '  2. 或在上面「采样点距离」里填一个卷尺量到的距离（米），'
                 '用这个已知距离反解 —— 这样不需要标定。')
             return
@@ -2522,17 +2831,19 @@ class MainWindow(QWidget, Ui_Form):
         t.begin_enrollment()
         self._enroll_ui_tick = 0
         self._enroll_commits_seen = int(t.enroll_progress().get('commits', 0))
+        self._enroll_failures_seen = int(
+            t.enroll_progress().get('failures', 0))
         self._enroll_last_error = ''
         self._refresh_enroll_status()
         self.status_bar.showMessage(
             '建档已开始：让被登记者完整入画、站定约 3 秒（可连续给多人建档）', 8000)
 
     def _refresh_enroll_status(self, extra: str = ''):
-        """把建档状态刷到设置页：按钮文字 + **大字** + 匹配行。
+        """把建档状态刷到标定页：按钮文字 + **大字** + 明细行。
 
         「大字」是 CHARTER 要求的界面提醒之一（另一条是提示音，见
         ``_poll_enroll_commits``）。``extra`` 非空时用它覆盖大字 ——
-        用于「已建档：xxx」这类一次性结论，否则显示实时进度。
+        用于「已建档：xxx」「建档失败：xxx」这类一次性结论，否则显示实时进度。
         """
         t = self._person_tracker
         self.btn_enroll_toggle.setText('结束建档' if t.enrolling else '开始建档')
@@ -2540,11 +2851,16 @@ class MainWindow(QWidget, Ui_Form):
             self._enroll_big_hold_until = time.monotonic() + _ENROLL_BIG_HOLD_S
             big = extra
         elif t.enrolling and time.monotonic() < self._enroll_big_hold_until:
-            big = None              # 结论还在保护期内：只刷按钮与匹配行
+            big = None              # 结论还在保护期内：只刷按钮与明细行
         elif t.enrolling:
             pr = t.enroll_progress()
-            head = (f'正在建档 {pr["samples"]}/{pr["required"]} 帧'
-                    if pr['samples'] > 0 else '正在建档：等待目标入画')
+            if pr['samples'] > 0:
+                # 把**实时反解值**摆在最显眼处：本次那个反解成 1.22 m 的档案
+                # 之所以能悄悄存进去，就是因为建档全程看不到这个数。
+                head = (f'正在建档 {pr["samples"]}/{pr["required"]} 帧　'
+                        f'反解身高 {pr["height_m"]:.2f} m')
+            else:
+                head = '正在建档：等待目标入画'
             big = head + (f'（画面里是 {pr["active_name"]}）'
                           if pr['active_name'] else '')
         else:
@@ -2552,26 +2868,63 @@ class MainWindow(QWidget, Ui_Form):
             big = f'未开始　（档案库 {n} 条）' if n else '未开始　（档案库为空）'
         if big is not None:
             self.label_enroll_status.setText(big)
-        self.label_enroll_match.setText(t.match_line())
+        self.label_enroll_match.setText(self._enroll_detail_line(t))
+
+    def _enroll_detail_line(self, t) -> str:
+        """大字下面那行：匹配结果 + 建档实时反解值 + 阻塞原因。
+
+        为什么合成一行：这几个数只有放在一起才能回答「为什么还没成」——
+        分数够却没提交 = 几何不对；反解值越界 = 直接看到是哪个数不合法；
+        分数不够 = 认人不行。原先的失败路径全是裸 return，界面上什么都不说。
+        """
+        parts = [t.match_line()]
+        pr = t.enroll_progress()
+        if pr['enrolling']:
+            lo, hi = pr['enroll_height_range']
+            wlo, whi = pr['enroll_width_range']
+            if pr['samples'] > 0:
+                parts.append(
+                    f'反解：身高 {pr["height_m"]:.2f} m（要求 {lo:.2f}–{hi:.2f}）／'
+                    f'肩宽 {pr["width_m"]:.2f} m（要求 {wlo:.2f}–{whi:.2f}）'
+                    f'　采样 {pr["samples"]}/{pr["required"]} 帧')
+            if pr['block_text']:
+                parts.append(f'⚠️ {pr["block_text"]}')
+        return '\n'.join(parts)
 
     def _poll_enroll_commits(self):
-        """提交成功一次 -> 响一声 + 大字确认。**不改变任何追踪/测距行为**。
+        """建档结论播报：成功 -> 响一声 + 大字确认；失败 -> 响两声 + 说明原因。
 
+        **不改变任何追踪/测距行为**，只把结论说清楚。
         提示音用 ``QApplication.beep()``：零新依赖、跨平台（CHARTER 建档条要求）。
+
+        两条通道各用各的序号去重（commits / failures），互不影响 ——
+        同一次会话里成功与失败可能交替发生。
         """
         t = self._person_tracker
-        n = int(t.enroll_progress().get('commits', 0))
-        if n <= self._enroll_commits_seen:
+        pr = t.enroll_progress()
+        n = int(pr.get('commits', 0))
+        if n > self._enroll_commits_seen:
+            self._enroll_commits_seen = n
+            QApplication.beep()
+            p = t.active
+            if p is not None:
+                self._refresh_enroll_status(
+                    f'已建档 · {p.name}　身高 {p.height_m:.2f} m / '
+                    f'肩宽 {p.width_m:.2f} m')
+            else:
+                self._refresh_enroll_status(f'已建档（第 {n} 条）')
             return
-        self._enroll_commits_seen = n
-        QApplication.beep()
-        p = t.active
-        if p is not None:
+        # 失败**必须说出来**：原先的复核不通过是裸 return，用户只会看到
+        # 「怎么一直不成功」而拿不到原因（2026-09-29 用户实际遇到的就是这个）。
+        f = pr.get('last_failure') or {}
+        seq = int(f.get('seq', 0))
+        if seq > self._enroll_failures_seen:
+            self._enroll_failures_seen = seq
+            QApplication.beep()
+            QApplication.beep()
             self._refresh_enroll_status(
-                f'已建档 · {p.name}　身高 {p.height_m:.2f} m / '
-                f'肩宽 {p.width_m:.2f} m')
-        else:
-            self._refresh_enroll_status(f'已建档（第 {n} 条）')
+                f'建档失败（第 {seq} 次）：{f.get("text", "")}\n'
+                f'这次**没有**写进档案 —— 按上面那句话改，然后重新站定')
 
     def _embed_for_enroll(self, frame_bgr, box):
         """为建档提取一帧 OSNet 嵌入。**任何失败都返回 None，绝不中断建档**。
@@ -2608,6 +2961,11 @@ class MainWindow(QWidget, Ui_Form):
             
     def on_detection_ready(self,target):#检测结果回调
 
+        # 本帧的「不是追踪目标」说明先清空，由下面的身份判定重新写。
+        # 不清就会停在上一次的结论上：画面里的框已经没了，红字却还写着
+        # 「非追踪目标」，或者反过来 —— 残留结论比不显示更容易骗人。
+        self._identity_reject_note = None
+
         if target and target['confidence']>=self.global_params.confidence_thres:# 增加置信度过滤，低于阈值视为无目标
             self.last_detection = target   # 过滤后的目标才进画面叠加（2026-09-26：
                                             # 之前无条件记录，低于阈值的椅子误检照样画框，
@@ -2628,7 +2986,8 @@ class MainWindow(QWidget, Ui_Form):
             else:
                 self.global_params.target_category = '未知'
             self.lcd_credibility.display(self.global_params.detection_conf)
-            self.label_target_category.setText(self.global_params.target_category)
+            # 显示值可能是身份而不是类别名（指定了追踪目标时），统一走这条路
+            self.refresh_target_category_label()
         else:
             self.last_detection = None    # 与上方配对：低于阈值 = 无目标，别留旧框
             self.global_params.detection_x = 320  # 重置为画面中心
@@ -2640,6 +2999,9 @@ class MainWindow(QWidget, Ui_Form):
             self.global_params.target_category = '未知'
             self.global_params.base_width=0.0
             self.lcd_credibility.display(0)
+            # 无目标时这一行原本**不刷新**（停在上一次的值）。指定了追踪目标后
+            # 必须刷 —— 否则人走出画面，标签还写着「张三（追踪中）」，等于骗人。
+            self.refresh_target_category_label()
         
         # 几何测距：**常开**。测距是门槛判据「UI 实时显示测距值」的核心输出，
         # 不应依赖「是否启用深度分析」或「是否在录制」。
@@ -2701,7 +3063,7 @@ class MainWindow(QWidget, Ui_Form):
 
         # 人特征档案：**只认人，不建档**（2026-09-27 起）。每帧仍算一次外观
         # 做匹配（回答「本帧画面里的人是不是追踪目标」）；但**采样与落盘只在
-        # 主动建档会话中进行**（begin_enrollment()，设置页第三步）。
+        # 主动建档会话中进行**（begin_enrollment()，标定页 ③）。
         # 关闭被动自动建档的原因见 core/person_model.py 类 docstring 的 ⚠️ 段。
         if is_person and isinstance(target, dict) \
                 and self.global_params.detection_height > 0 \
@@ -2727,11 +3089,39 @@ class MainWindow(QWidget, Ui_Form):
                     and res.trusted
                     and res.method in ('接触点法', '两法一致'))
 
-            # 只在建档会话里提嵌入：那是唯一会用到它的时刻。
-            # 单张约 9 ms（2 线程，本机实测），30 FPS 的主线程没有富余，
-            # 平时每帧都提纯属浪费。
+            # 不合格时把**具体原因**算出来一起传下去：建档会话里界面会显示它。
+            # 原先这些判据在 person_model 里都是裸 return，用户在镜头前只能空等，
+            # 分不清是贴边、太远、还是距离不可信 —— 2026-09-29 实测的反馈缺陷。
+            bits = []
+            if not whole:
+                clip = [n for n, hit in (('头顶', vis.touches_top),
+                                         ('脚', vis.touches_bottom),
+                                         ('左侧', vis.touches_left),
+                                         ('右侧', vis.touches_right)) if hit]
+                bits.append(f'目标{"、".join(clip)}贴到画面边缘，请后退一些'
+                            if clip else '目标未完整入画')
+            if manual_d <= 0:
+                if dist is None:
+                    bits.append('本帧距离不可信 —— 可在上面填一个卷尺量到的距离，'
+                                '绕过标定')
+                elif res is not None and not res.trusted:
+                    bits.append('距离解算不可信' +
+                                (f'（{res.reason}）' if res.reason else ''))
+                elif res is not None and res.method not in ('接触点法', '两法一致'):
+                    bits.append(f'当前测距走的是「{res.method}」，'
+                                f'建档要求接触点法')
+            capture_note = '；'.join(bits)
+
+            # OSNet 嵌入：建档会话需要；追踪时如果档案库里有可比嵌入也必须提，
+            # 否则 _match_active 会回落到 HSV 直方图 —— 该路线在实测中命中率
+            # 为 0%（session-20260929-131735，250 帧全未过 0.55 门槛），
+            # 而同一批数据的 OSNet 路线命中 94.0%。
+            # 路人池（cohort 归一化）同样需要嵌入。
             emb = None
-            if self._person_tracker.enrolling and capture_ok:
+            has_emb_profile = any(
+                bool((p.embedding or []) and p.emb_model == self._person_tracker.emb_tag)
+                for p in self._person_tracker.profiles)
+            if (self._person_tracker.enrolling and capture_ok) or has_emb_profile:
                 emb = self._embed_for_enroll(frame_bgr, target)
 
             prev_width = self._person_tracker.ranging_width_m(
@@ -2740,7 +3130,7 @@ class MainWindow(QWidget, Ui_Form):
                 target, frame_bgr, now_mono,
                 capture_ok=capture_ok, distance_m=distance_used,
                 fx=self.ranger.intrinsics.fx, fy=self.ranger.intrinsics.fy,
-                embedding=emb)
+                embedding=emb, capture_note=capture_note)
             # 档案匹配/更新后，宽度法换用该用的肩宽（变了才动，避免抖动）。
             # 指定了追踪目标时用的是**该目标档案里的**肩宽（ranging_width_m）；
             # 未指定时才是「本帧匹配到的那个人」的 —— 见该方法 docstring。
@@ -2773,8 +3163,40 @@ class MainWindow(QWidget, Ui_Form):
                 if self._person_tracker.enrolling:
                     self._refresh_enroll_status()
                 else:
-                    self.label_enroll_match.setText(
-                        self._person_tracker.match_line())
+                    self._set_match_line(self._person_tracker.match_line())
+
+            # ---- 只为被追踪的这一个出数（CHARTER「范围内的」第 4 条）--------
+            # 本帧认出来的是别人、或者谁都没认出来 -> 这个框不是追踪目标，
+            # **不出数**：画面不画框（见 _draw_overlay）、距离按「不可测」处理，
+            # 原因写进读数下面那行（用户 2026-09-29 要求）。
+            #
+            # 为什么连距离一起拦：距离 / 速度门控 / TTC 全都是**针对这一个体**
+            # 的量，套在别人身上给出来的数字看着正常、实际是另一个人的 ——
+            # 比「不可测」更坏，与 1.4 节「门控拦的是错值，不是拦人」同一条理。
+            # 位置必须在 observe() 之后（判定在那里才产生）、在下面所有消费点
+            # 之前（global_params.distance / TTC / 曲线 / 录制 / 读数）。
+            reject_note = self._identity_reject_reason()
+            if reject_note:
+                self._identity_reject_note = reject_note
+                res = RangingResult(reason=reject_note)
+                dist = None
+                # 框不是追踪目标 -> 滤波器里那段历史同样不可信，一起复位。
+                # 不复位的话，人回到画面里时中值窗里还留着**别人的**距离，
+                # 头几帧会给出一个看着正常、其实是路人位置的读数。
+                self._dist_filter.reset()
+                # 速度门控同理：别人走过的距离不能当成本人的锚点
+                self._speed_gate.miss(now_mono)
+        else:
+            # 没走进匹配链路时**必须明说**，不能留旧分数 —— 匹配行只在上面
+            # 那条分支里重算，不刷就停在上一次的数值上。2026-09-29 用户据此
+            # 读成「画面里没人也有 0.44」，而 0.44 其实是残留。这条残留会
+            # 直接误导「阈值松不松」的判断，所以三种原因分别说清。
+            if is_person and not self.ranger.intrinsics.is_valid():
+                self._set_match_line('匹配：相机未标定，认人未计算')
+            elif is_person:
+                self._set_match_line('匹配：本帧无可用检测框，未计算')
+            else:
+                self._set_match_line('匹配：本帧画面里没有人，未计算')
         # 到这里 dist 已是全链路唯一的规范距离（去噪在测距之后立即完成，
         # 见上方「距离去噪」段）：门控/人档案/读数/TTC/曲线/录制都用它。
         self.global_params.distance = dist

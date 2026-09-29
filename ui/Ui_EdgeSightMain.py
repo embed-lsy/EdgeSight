@@ -17,9 +17,9 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFrame, QGroupBox, QHBoxLayout, QLCDNumber,
-    QLabel, QProgressBar, QPushButton, QScrollArea,
-    QSizePolicy, QSlider, QSpinBox, QTabWidget,
-    QVBoxLayout, QWidget)
+    QLabel, QListWidget, QListWidgetItem, QProgressBar,
+    QPushButton, QScrollArea, QSizePolicy, QSlider,
+    QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 from pyqtgraph import PlotWidget
 
@@ -344,44 +344,6 @@ class Ui_Form(object):
         self.label_ttc_reason.setStyleSheet(u"font-size: 9pt;")
 
         self.verticalLayout_5.addWidget(self.label_ttc_reason)
-
-        self.horizontalLayout_mount = QHBoxLayout()
-        self.horizontalLayout_mount.setObjectName(u"horizontalLayout_mount")
-        self.label_known_dist = QLabel(self.groupBox_targetpos)
-        self.label_known_dist.setObjectName(u"label_known_dist")
-        self.label_known_dist.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.horizontalLayout_mount.addWidget(self.label_known_dist)
-
-        self.spin_known_dist = QDoubleSpinBox(self.groupBox_targetpos)
-        self.spin_known_dist.setObjectName(u"spin_known_dist")
-        self.spin_known_dist.setDecimals(2)
-        self.spin_known_dist.setMinimum(0.200000000000000)
-        self.spin_known_dist.setMaximum(50.000000000000000)
-        self.spin_known_dist.setSingleStep(0.500000000000000)
-        self.spin_known_dist.setValue(2.000000000000000)
-
-        self.horizontalLayout_mount.addWidget(self.spin_known_dist)
-
-        self.btn_mark_known = QPushButton(self.groupBox_targetpos)
-        self.btn_mark_known.setObjectName(u"btn_mark_known")
-
-        self.horizontalLayout_mount.addWidget(self.btn_mark_known)
-
-        self.btn_solve_mount = QPushButton(self.groupBox_targetpos)
-        self.btn_solve_mount.setObjectName(u"btn_solve_mount")
-        self.btn_solve_mount.setEnabled(False)
-
-        self.horizontalLayout_mount.addWidget(self.btn_solve_mount)
-
-
-        self.verticalLayout_5.addLayout(self.horizontalLayout_mount)
-
-        self.label_mount_status = QLabel(self.groupBox_targetpos)
-        self.label_mount_status.setObjectName(u"label_mount_status")
-        self.label_mount_status.setWordWrap(True)
-
-        self.verticalLayout_5.addWidget(self.label_mount_status)
 
 
         self.verticalLayout_4.addWidget(self.groupBox_targetpos)
@@ -911,7 +873,196 @@ class Ui_Form(object):
 
         self.verticalLayout_25.addWidget(self.groupBox_14)
 
-        self.groupBox_calib = QGroupBox(self.scrollAreaWidgetContents)
+        self.groupBox_profiles = QGroupBox(self.scrollAreaWidgetContents)
+        self.groupBox_profiles.setObjectName(u"groupBox_profiles")
+        self.verticalLayout_profiles = QVBoxLayout(self.groupBox_profiles)
+        self.verticalLayout_profiles.setObjectName(u"verticalLayout_profiles")
+        self.label_profiles_hint = QLabel(self.groupBox_profiles)
+        self.label_profiles_hint.setObjectName(u"label_profiles_hint")
+        self.label_profiles_hint.setWordWrap(True)
+
+        self.verticalLayout_profiles.addWidget(self.label_profiles_hint)
+
+        self.list_profiles = QListWidget(self.groupBox_profiles)
+        self.list_profiles.setObjectName(u"list_profiles")
+        self.list_profiles.setMinimumSize(QSize(0, 150))
+
+        self.verticalLayout_profiles.addWidget(self.list_profiles)
+
+        self.horizontalLayout_profiles = QHBoxLayout()
+        self.horizontalLayout_profiles.setObjectName(u"horizontalLayout_profiles")
+        self.btn_profile_rename = QPushButton(self.groupBox_profiles)
+        self.btn_profile_rename.setObjectName(u"btn_profile_rename")
+        self.btn_profile_rename.setMinimumSize(QSize(0, 36))
+
+        self.horizontalLayout_profiles.addWidget(self.btn_profile_rename)
+
+        self.btn_profile_delete = QPushButton(self.groupBox_profiles)
+        self.btn_profile_delete.setObjectName(u"btn_profile_delete")
+        self.btn_profile_delete.setMinimumSize(QSize(0, 36))
+
+        self.horizontalLayout_profiles.addWidget(self.btn_profile_delete)
+
+        self.btn_profile_refresh = QPushButton(self.groupBox_profiles)
+        self.btn_profile_refresh.setObjectName(u"btn_profile_refresh")
+        self.btn_profile_refresh.setMinimumSize(QSize(0, 36))
+
+        self.horizontalLayout_profiles.addWidget(self.btn_profile_refresh)
+
+
+        self.verticalLayout_profiles.addLayout(self.horizontalLayout_profiles)
+
+        self.label_profile_detail = QLabel(self.groupBox_profiles)
+        self.label_profile_detail.setObjectName(u"label_profile_detail")
+        self.label_profile_detail.setWordWrap(True)
+
+        self.verticalLayout_profiles.addWidget(self.label_profile_detail)
+
+
+        self.verticalLayout_25.addWidget(self.groupBox_profiles)
+
+        self.scrollArea.setWidget(self.scrollAreaWidgetContents)
+
+        self.verticalLayout_20.addWidget(self.scrollArea)
+
+        self.tabWidget.addTab(self.tab_setting, "")
+        self.tab_record = QWidget()
+        self.tab_record.setObjectName(u"tab_record")
+        self.verticalLayout_rec = QVBoxLayout(self.tab_record)
+        self.verticalLayout_rec.setObjectName(u"verticalLayout_rec")
+        self.groupBox_rec = QGroupBox(self.tab_record)
+        self.groupBox_rec.setObjectName(u"groupBox_rec")
+        self.verticalLayout_rec1 = QVBoxLayout(self.groupBox_rec)
+        self.verticalLayout_rec1.setObjectName(u"verticalLayout_rec1")
+        self.horizontalLayout_rec1 = QHBoxLayout()
+        self.horizontalLayout_rec1.setObjectName(u"horizontalLayout_rec1")
+        self.btn_rec_toggle = QPushButton(self.groupBox_rec)
+        self.btn_rec_toggle.setObjectName(u"btn_rec_toggle")
+        self.btn_rec_toggle.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_rec1.addWidget(self.btn_rec_toggle)
+
+        self.label_rec_status = QLabel(self.groupBox_rec)
+        self.label_rec_status.setObjectName(u"label_rec_status")
+
+        self.horizontalLayout_rec1.addWidget(self.label_rec_status)
+
+
+        self.verticalLayout_rec1.addLayout(self.horizontalLayout_rec1)
+
+        self.label_rec_info = QLabel(self.groupBox_rec)
+        self.label_rec_info.setObjectName(u"label_rec_info")
+        self.label_rec_info.setWordWrap(True)
+
+        self.verticalLayout_rec1.addWidget(self.label_rec_info)
+
+
+        self.verticalLayout_rec.addWidget(self.groupBox_rec)
+
+        self.groupBox_play = QGroupBox(self.tab_record)
+        self.groupBox_play.setObjectName(u"groupBox_play")
+        self.verticalLayout_play = QVBoxLayout(self.groupBox_play)
+        self.verticalLayout_play.setObjectName(u"verticalLayout_play")
+        self.horizontalLayout_play1 = QHBoxLayout()
+        self.horizontalLayout_play1.setObjectName(u"horizontalLayout_play1")
+        self.btn_play_pick = QPushButton(self.groupBox_play)
+        self.btn_play_pick.setObjectName(u"btn_play_pick")
+        self.btn_play_pick.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_play1.addWidget(self.btn_play_pick)
+
+        self.btn_play_toggle = QPushButton(self.groupBox_play)
+        self.btn_play_toggle.setObjectName(u"btn_play_toggle")
+        self.btn_play_toggle.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_play1.addWidget(self.btn_play_toggle)
+
+        self.btn_play_stop = QPushButton(self.groupBox_play)
+        self.btn_play_stop.setObjectName(u"btn_play_stop")
+        self.btn_play_stop.setMinimumSize(QSize(0, 40))
+
+        self.horizontalLayout_play1.addWidget(self.btn_play_stop)
+
+        self.slider_play_pos = QSlider(self.groupBox_play)
+        self.slider_play_pos.setObjectName(u"slider_play_pos")
+        self.slider_play_pos.setMinimum(0)
+        self.slider_play_pos.setMaximum(1000)
+        self.slider_play_pos.setValue(0)
+        self.slider_play_pos.setOrientation(Qt.Orientation.Horizontal)
+
+        self.horizontalLayout_play1.addWidget(self.slider_play_pos)
+
+        self.label_play_pos = QLabel(self.groupBox_play)
+        self.label_play_pos.setObjectName(u"label_play_pos")
+
+        self.horizontalLayout_play1.addWidget(self.label_play_pos)
+
+
+        self.verticalLayout_play.addLayout(self.horizontalLayout_play1)
+
+        self.label_play_info = QLabel(self.groupBox_play)
+        self.label_play_info.setObjectName(u"label_play_info")
+        self.label_play_info.setWordWrap(True)
+
+        self.verticalLayout_play.addWidget(self.label_play_info)
+
+
+        self.verticalLayout_rec.addWidget(self.groupBox_play)
+
+        self.groupBox_play_plot = QGroupBox(self.tab_record)
+        self.groupBox_play_plot.setObjectName(u"groupBox_play_plot")
+        self.verticalLayout_playplot = QVBoxLayout(self.groupBox_play_plot)
+        self.verticalLayout_playplot.setObjectName(u"verticalLayout_playplot")
+        self.plot_replay_distance = PlotWidget(self.groupBox_play_plot)
+        self.plot_replay_distance.setObjectName(u"plot_replay_distance")
+
+        self.verticalLayout_playplot.addWidget(self.plot_replay_distance)
+
+
+        self.verticalLayout_rec.addWidget(self.groupBox_play_plot)
+
+        self.label_replay_summary = QLabel(self.tab_record)
+        self.label_replay_summary.setObjectName(u"label_replay_summary")
+        self.label_replay_summary.setWordWrap(True)
+
+        self.verticalLayout_rec.addWidget(self.label_replay_summary)
+
+        self.tabWidget.addTab(self.tab_record, "")
+        self.tab_calib = QWidget()
+        self.tab_calib.setObjectName(u"tab_calib")
+        self.verticalLayout_calibtab = QVBoxLayout(self.tab_calib)
+        self.verticalLayout_calibtab.setObjectName(u"verticalLayout_calibtab")
+        self.label_calibtab_hint = QLabel(self.tab_calib)
+        self.label_calibtab_hint.setObjectName(u"label_calibtab_hint")
+        self.label_calibtab_hint.setWordWrap(True)
+
+        self.verticalLayout_calibtab.addWidget(self.label_calibtab_hint)
+
+        self.groupBox_calib_preview = QGroupBox(self.tab_calib)
+        self.groupBox_calib_preview.setObjectName(u"groupBox_calib_preview")
+        self.verticalLayout_calibprev = QVBoxLayout(self.groupBox_calib_preview)
+        self.verticalLayout_calibprev.setObjectName(u"verticalLayout_calibprev")
+        self.lbl_calib_view = QLabel(self.groupBox_calib_preview)
+        self.lbl_calib_view.setObjectName(u"lbl_calib_view")
+        self.lbl_calib_view.setMinimumSize(QSize(320, 240))
+        self.lbl_calib_view.setMaximumSize(QSize(16777215, 300))
+        self.lbl_calib_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.verticalLayout_calibprev.addWidget(self.lbl_calib_view)
+
+
+        self.verticalLayout_calibtab.addWidget(self.groupBox_calib_preview)
+
+        self.scrollArea_calib = QScrollArea(self.tab_calib)
+        self.scrollArea_calib.setObjectName(u"scrollArea_calib")
+        self.scrollArea_calib.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scrollArea_calib.setWidgetResizable(True)
+        self.scrollAreaWidgetContents_calib = QWidget()
+        self.scrollAreaWidgetContents_calib.setObjectName(u"scrollAreaWidgetContents_calib")
+        self.scrollAreaWidgetContents_calib.setGeometry(QRect(0, 0, 986, 623))
+        self.verticalLayout_calibinner = QVBoxLayout(self.scrollAreaWidgetContents_calib)
+        self.verticalLayout_calibinner.setObjectName(u"verticalLayout_calibinner")
+        self.groupBox_calib = QGroupBox(self.scrollAreaWidgetContents_calib)
         self.groupBox_calib.setObjectName(u"groupBox_calib")
         self.verticalLayout_calib = QVBoxLayout(self.groupBox_calib)
         self.verticalLayout_calib.setObjectName(u"verticalLayout_calib")
@@ -1072,9 +1223,60 @@ class Ui_Form(object):
         self.verticalLayout_calib.addWidget(self.label_calib_info)
 
 
-        self.verticalLayout_25.addWidget(self.groupBox_calib)
+        self.verticalLayout_calibinner.addWidget(self.groupBox_calib)
 
-        self.groupBox_enroll = QGroupBox(self.scrollAreaWidgetContents)
+        self.groupBox_mount = QGroupBox(self.scrollAreaWidgetContents_calib)
+        self.groupBox_mount.setObjectName(u"groupBox_mount")
+        self.verticalLayout_mount = QVBoxLayout(self.groupBox_mount)
+        self.verticalLayout_mount.setObjectName(u"verticalLayout_mount")
+        self.label_mount_hint = QLabel(self.groupBox_mount)
+        self.label_mount_hint.setObjectName(u"label_mount_hint")
+        self.label_mount_hint.setWordWrap(True)
+
+        self.verticalLayout_mount.addWidget(self.label_mount_hint)
+
+        self.horizontalLayout_mount = QHBoxLayout()
+        self.horizontalLayout_mount.setObjectName(u"horizontalLayout_mount")
+        self.label_known_dist = QLabel(self.groupBox_mount)
+        self.label_known_dist.setObjectName(u"label_known_dist")
+        self.label_known_dist.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.horizontalLayout_mount.addWidget(self.label_known_dist)
+
+        self.spin_known_dist = QDoubleSpinBox(self.groupBox_mount)
+        self.spin_known_dist.setObjectName(u"spin_known_dist")
+        self.spin_known_dist.setDecimals(2)
+        self.spin_known_dist.setMinimum(0.200000000000000)
+        self.spin_known_dist.setMaximum(50.000000000000000)
+        self.spin_known_dist.setSingleStep(0.500000000000000)
+        self.spin_known_dist.setValue(2.000000000000000)
+
+        self.horizontalLayout_mount.addWidget(self.spin_known_dist)
+
+        self.btn_mark_known = QPushButton(self.groupBox_mount)
+        self.btn_mark_known.setObjectName(u"btn_mark_known")
+
+        self.horizontalLayout_mount.addWidget(self.btn_mark_known)
+
+        self.btn_solve_mount = QPushButton(self.groupBox_mount)
+        self.btn_solve_mount.setObjectName(u"btn_solve_mount")
+        self.btn_solve_mount.setEnabled(False)
+
+        self.horizontalLayout_mount.addWidget(self.btn_solve_mount)
+
+
+        self.verticalLayout_mount.addLayout(self.horizontalLayout_mount)
+
+        self.label_mount_status = QLabel(self.groupBox_mount)
+        self.label_mount_status.setObjectName(u"label_mount_status")
+        self.label_mount_status.setWordWrap(True)
+
+        self.verticalLayout_mount.addWidget(self.label_mount_status)
+
+
+        self.verticalLayout_calibinner.addWidget(self.groupBox_mount)
+
+        self.groupBox_enroll = QGroupBox(self.scrollAreaWidgetContents_calib)
         self.groupBox_enroll.setObjectName(u"groupBox_enroll")
         self.verticalLayout_enroll = QVBoxLayout(self.groupBox_enroll)
         self.verticalLayout_enroll.setObjectName(u"verticalLayout_enroll")
@@ -1126,115 +1328,13 @@ class Ui_Form(object):
         self.verticalLayout_enroll.addWidget(self.label_enroll_match)
 
 
-        self.verticalLayout_25.addWidget(self.groupBox_enroll)
+        self.verticalLayout_calibinner.addWidget(self.groupBox_enroll)
 
-        self.scrollArea.setWidget(self.scrollAreaWidgetContents)
+        self.scrollArea_calib.setWidget(self.scrollAreaWidgetContents_calib)
 
-        self.verticalLayout_20.addWidget(self.scrollArea)
+        self.verticalLayout_calibtab.addWidget(self.scrollArea_calib)
 
-        self.tabWidget.addTab(self.tab_setting, "")
-        self.tab_record = QWidget()
-        self.tab_record.setObjectName(u"tab_record")
-        self.verticalLayout_rec = QVBoxLayout(self.tab_record)
-        self.verticalLayout_rec.setObjectName(u"verticalLayout_rec")
-        self.groupBox_rec = QGroupBox(self.tab_record)
-        self.groupBox_rec.setObjectName(u"groupBox_rec")
-        self.verticalLayout_rec1 = QVBoxLayout(self.groupBox_rec)
-        self.verticalLayout_rec1.setObjectName(u"verticalLayout_rec1")
-        self.horizontalLayout_rec1 = QHBoxLayout()
-        self.horizontalLayout_rec1.setObjectName(u"horizontalLayout_rec1")
-        self.btn_rec_toggle = QPushButton(self.groupBox_rec)
-        self.btn_rec_toggle.setObjectName(u"btn_rec_toggle")
-        self.btn_rec_toggle.setMinimumSize(QSize(0, 40))
-
-        self.horizontalLayout_rec1.addWidget(self.btn_rec_toggle)
-
-        self.label_rec_status = QLabel(self.groupBox_rec)
-        self.label_rec_status.setObjectName(u"label_rec_status")
-
-        self.horizontalLayout_rec1.addWidget(self.label_rec_status)
-
-
-        self.verticalLayout_rec1.addLayout(self.horizontalLayout_rec1)
-
-        self.label_rec_info = QLabel(self.groupBox_rec)
-        self.label_rec_info.setObjectName(u"label_rec_info")
-        self.label_rec_info.setWordWrap(True)
-
-        self.verticalLayout_rec1.addWidget(self.label_rec_info)
-
-
-        self.verticalLayout_rec.addWidget(self.groupBox_rec)
-
-        self.groupBox_play = QGroupBox(self.tab_record)
-        self.groupBox_play.setObjectName(u"groupBox_play")
-        self.verticalLayout_play = QVBoxLayout(self.groupBox_play)
-        self.verticalLayout_play.setObjectName(u"verticalLayout_play")
-        self.horizontalLayout_play1 = QHBoxLayout()
-        self.horizontalLayout_play1.setObjectName(u"horizontalLayout_play1")
-        self.btn_play_pick = QPushButton(self.groupBox_play)
-        self.btn_play_pick.setObjectName(u"btn_play_pick")
-        self.btn_play_pick.setMinimumSize(QSize(0, 40))
-
-        self.horizontalLayout_play1.addWidget(self.btn_play_pick)
-
-        self.btn_play_toggle = QPushButton(self.groupBox_play)
-        self.btn_play_toggle.setObjectName(u"btn_play_toggle")
-        self.btn_play_toggle.setMinimumSize(QSize(0, 40))
-
-        self.horizontalLayout_play1.addWidget(self.btn_play_toggle)
-
-        self.btn_play_stop = QPushButton(self.groupBox_play)
-        self.btn_play_stop.setObjectName(u"btn_play_stop")
-        self.btn_play_stop.setMinimumSize(QSize(0, 40))
-
-        self.horizontalLayout_play1.addWidget(self.btn_play_stop)
-
-        self.slider_play_pos = QSlider(self.groupBox_play)
-        self.slider_play_pos.setObjectName(u"slider_play_pos")
-        self.slider_play_pos.setMinimum(0)
-        self.slider_play_pos.setMaximum(1000)
-        self.slider_play_pos.setValue(0)
-        self.slider_play_pos.setOrientation(Qt.Orientation.Horizontal)
-
-        self.horizontalLayout_play1.addWidget(self.slider_play_pos)
-
-        self.label_play_pos = QLabel(self.groupBox_play)
-        self.label_play_pos.setObjectName(u"label_play_pos")
-
-        self.horizontalLayout_play1.addWidget(self.label_play_pos)
-
-
-        self.verticalLayout_play.addLayout(self.horizontalLayout_play1)
-
-        self.label_play_info = QLabel(self.groupBox_play)
-        self.label_play_info.setObjectName(u"label_play_info")
-        self.label_play_info.setWordWrap(True)
-
-        self.verticalLayout_play.addWidget(self.label_play_info)
-
-
-        self.verticalLayout_rec.addWidget(self.groupBox_play)
-
-        self.groupBox_play_plot = QGroupBox(self.tab_record)
-        self.groupBox_play_plot.setObjectName(u"groupBox_play_plot")
-        self.verticalLayout_playplot = QVBoxLayout(self.groupBox_play_plot)
-        self.verticalLayout_playplot.setObjectName(u"verticalLayout_playplot")
-        self.plot_replay_distance = PlotWidget(self.groupBox_play_plot)
-        self.plot_replay_distance.setObjectName(u"plot_replay_distance")
-
-        self.verticalLayout_playplot.addWidget(self.plot_replay_distance)
-
-
-        self.verticalLayout_rec.addWidget(self.groupBox_play_plot)
-
-        self.label_replay_summary = QLabel(self.tab_record)
-        self.label_replay_summary.setObjectName(u"label_replay_summary")
-        self.label_replay_summary.setWordWrap(True)
-
-        self.verticalLayout_rec.addWidget(self.label_replay_summary)
-
-        self.tabWidget.addTab(self.tab_record, "")
+        self.tabWidget.addTab(self.tab_calib, "")
 
         self.verticalLayout_10.addWidget(self.tabWidget)
 
@@ -1265,10 +1365,6 @@ class Ui_Form(object):
         self.label_ttc_title.setText(QCoreApplication.translate("Form", u"\u78b0\u649e\u9884\u8b66\uff1a", None))
         self.label_ttc_value.setText(QCoreApplication.translate("Form", u"--", None))
         self.label_ttc_reason.setText("")
-        self.label_known_dist.setText(QCoreApplication.translate("Form", u"\u5df2\u77e5\u8ddd\u79bb\uff08m\uff09\uff1a", None))
-        self.btn_mark_known.setText(QCoreApplication.translate("Form", u"\u8bb0\u4e3a\u91c7\u6837\u70b9", None))
-        self.btn_solve_mount.setText(QCoreApplication.translate("Form", u"\u6c42\u89e3\u5b89\u88c5\u53c2\u6570", None))
-        self.label_mount_status.setText(QCoreApplication.translate("Form", u"\u5b89\u88c5\u53c2\u6570\u81ea\u6807\u5b9a\uff1a\u628a\u76ee\u6807\u6446\u5230\u5377\u5c3a\u5df2\u77e5\u8ddd\u79bb\u5904\u3001\u9759\u6b62\uff0c\u70b9\u300c\u8bb0\u4e3a\u91c7\u6837\u70b9\u300d\u3002\u63a8\u8350 2 m / 5 m / 10 m \u4e09\u70b9\uff08\u4e24\u70b9\u65e0\u6cd5\u81ea\u67e5\u9519\u8bef\u6807\u8bb0\uff09", None))
         self.groupBox_10.setTitle(QCoreApplication.translate("Form", u"\u6a21\u578b\u53c2\u6570\u5b9e\u65f6\u5fae\u8c03", None))
         self.label_23.setText(QCoreApplication.translate("Form", u" \u7f6e\u4fe1\u5ea6\u9608\u503c\uff1a", None))
         self.label_confidence_thres.setText(QCoreApplication.translate("Form", u"0.40", None))
@@ -1322,7 +1418,30 @@ class Ui_Form(object):
         self.QPuahButton_calibrate_status.setText(QCoreApplication.translate("Form", u"\u5e94\u7528\u53c2\u6570", None))
         self.label_30.setText(QCoreApplication.translate("Form", u"\u6807\u5b9a\u72b6\u6001\uff1a", None))
         self.label__calibrate_status.setText(QCoreApplication.translate("Form", u"\u672a\u6807\u5b9a", None))
-        self.groupBox_calib.setTitle(QCoreApplication.translate("Form", u"\u76f8\u673a\u6807\u5b9a", None))
+        self.groupBox_profiles.setTitle(QCoreApplication.translate("Form", u"\u6307\u7eb9\u6863\u6848\u7ba1\u7406\uff08\u67e5 / \u6539 / \u5220\uff09", None))
+        self.label_profiles_hint.setText(QCoreApplication.translate("Form", u"\u5efa\u6863\u5728\u300c\u6807\u5b9a\u300d\u9875\u7b2c\u4e09\u6b65\u3002\u8fd9\u91cc\u7ba1\u5df2\u5efa\u7684\u6863\uff1a\u9009\u4e2d\u4e00\u6761\u53ef\u4ee5\u6539\u540d\u6216\u5220\u9664\u3002\u5220\u9664\u4f1a\u7acb\u523b\u5199\u76d8\u3001\u4e0d\u53ef\u64a4\u9500\uff1b\u82e5\u5220\u7684\u6b63\u662f\u8ffd\u8e2a\u76ee\u6807\uff0c\u8ffd\u8e2a\u76ee\u6807\u4f1a\u540c\u65f6\u88ab\u53d6\u6d88\u3002", None))
+        self.btn_profile_rename.setText(QCoreApplication.translate("Form", u"\u6539\u540d\u2026", None))
+        self.btn_profile_delete.setText(QCoreApplication.translate("Form", u"\u5220\u9664", None))
+        self.btn_profile_refresh.setText(QCoreApplication.translate("Form", u"\u5237\u65b0\u5217\u8868", None))
+        self.label_profile_detail.setText(QCoreApplication.translate("Form", u"\uff08\u9009\u4e2d\u4e00\u6761\u6863\u6848\uff0c\u8fd9\u91cc\u663e\u793a\u5b83\u7684\u6765\u6e90\u3001\u6837\u672c\u91cf\u4e0e\u5d4c\u5165\u72b6\u6001\uff09", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_setting), QCoreApplication.translate("Form", u"\u8bbe\u7f6e", None))
+        self.groupBox_rec.setTitle(QCoreApplication.translate("Form", u"\u5f55\u5236", None))
+        self.btn_rec_toggle.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u5f55\u5236", None))
+        self.label_rec_status.setText(QCoreApplication.translate("Form", u"\u7a7a\u95f2", None))
+        self.label_rec_info.setText(QCoreApplication.translate("Form", u"\u672a\u5f55\u5236\u3002\u5f00\u59cb\u540e\u4f1a\u628a\u753b\u9762\u4e0e\u68c0\u6d4b/\u6d4b\u8ddd\u7ed3\u679c\u5206\u522b\u843d\u76d8\uff0c\u5f55\u5236\u671f\u95f4\u4e0d\u963b\u585e\u4e3b\u94fe\u8def\u3002", None))
+        self.groupBox_play.setTitle(QCoreApplication.translate("Form", u"\u56de\u653e\u5206\u6790", None))
+        self.btn_play_pick.setText(QCoreApplication.translate("Form", u"\u9009\u62e9\u5f55\u5236", None))
+        self.btn_play_toggle.setText(QCoreApplication.translate("Form", u"\u64ad\u653e", None))
+        self.btn_play_stop.setText(QCoreApplication.translate("Form", u"\u505c\u6b62", None))
+        self.label_play_pos.setText(QCoreApplication.translate("Form", u"0/0", None))
+        self.label_play_info.setText(QCoreApplication.translate("Form", u"\u672a\u9009\u62e9\u5f55\u5236\u3002\u56de\u653e\u89c6\u9891\u8f68\u4e0e\u6570\u636e\u8f68\u540c\u6b65\uff0c\u53ef\u5728\u4e0b\u65b9\u67e5\u770b\u6d4b\u8ddd\u66f2\u7ebf\u3002", None))
+        self.groupBox_play_plot.setTitle(QCoreApplication.translate("Form", u"\u6d4b\u8ddd\u66f2\u7ebf\uff08\u5f55\u5236/\u56de\u653e\uff09", None))
+        self.label_replay_summary.setText(QCoreApplication.translate("Form", u"\u5c1a\u65e0\u56de\u653e\u6570\u636e\u3002", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_record), QCoreApplication.translate("Form", u"\u5f55\u5236\u56de\u653e", None))
+        self.label_calibtab_hint.setText(QCoreApplication.translate("Form", u"\u6807\u5b9a\u4e0e\u767b\u8bb0\u5171\u4e09\u4ef6\uff0c\u4e92\u4e0d\u4f9d\u8d56\u3001\u6309\u9700\u505a\uff1a\u2460 \u68cb\u76d8\u6807\u5b9a\uff08\u5185\u53c2\u4e0e\u672c\u673a\u8bbe\u5907\u7ed1\u5b9a\uff09\u2192 \u2461 \u91c7\u6837\u70b9\u6807\u5b9a\uff08\u5b89\u88c5\u9ad8\u5ea6/\u4fef\u89d2\uff09\u2192 \u2462 \u6307\u7eb9\u5efa\u6863\uff08\u8bb0\u4f4f\u8fd9\u4e2a\u4eba\uff09\u3002\u524d\u4e24\u4ef6\u968f\u8bbe\u5907\u505a\u4e00\u6b21\uff0c\u7b2c\u4e09\u4ef6\u6bcf\u6362\u4e00\u4e2a\u4eba\u505a\u4e00\u6b21\u3002\u4e09\u4ef6\u90fd\u8981\u770b\u7740\u4e0b\u9762\u7684\u753b\u9762\u64cd\u4f5c\u3002", None))
+        self.groupBox_calib_preview.setTitle(QCoreApplication.translate("Form", u"\u753b\u9762\uff08\u5e26\u68c0\u6d4b\u6846\u4e0e\u6d4b\u8ddd\uff09", None))
+        self.lbl_calib_view.setText(QCoreApplication.translate("Form", u"\u6444\u50cf\u5934\u672a\u8fde\u63a5", None))
+        self.groupBox_calib.setTitle(QCoreApplication.translate("Form", u"\u2460 \u68cb\u76d8\u6807\u5b9a\uff08\u5185\u53c2\uff09", None))
         self.label_camera_device.setText(QCoreApplication.translate("Form", u"\u672c\u673a\u6444\u50cf\u5934\uff1a", None))
 #if QT_CONFIG(tooltip)
         self.combo_camera_device.setToolTip(QCoreApplication.translate("Form", u"\u7a0b\u5e8f\u56fa\u5b9a\u6253\u5f00\u7d22\u5f15 0 \u7684\u6444\u50cf\u5934\u3002\u672c\u673a\u53ea\u6709\u4e00\u53f0\u65f6\u4f1a\u81ea\u52a8\u786e\u8ba4\uff1b\u6709\u591a\u53f0\u65f6\u8bf7\u5728\u8fd9\u91cc\u6307\u660e\u7a0b\u5e8f\u6b63\u5728\u7528\u7684\u662f\u54ea\u4e00\u53f0\u2014\u2014\u6807\u5b9a\u7ed3\u679c\u6309\u8bbe\u5907\u5206\u522b\u4fdd\u5b58\uff0c\u6362\u76f8\u673a\u4e0d\u4f1a\u6df7\u7528\u522b\u4eba\u7684\u5185\u53c2\u3002", None))
@@ -1350,8 +1469,14 @@ class Ui_Form(object):
         self.btn_calib_capture.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u91c7\u96c6", None))
         self.btn_calib_solve.setText(QCoreApplication.translate("Form", u"\u6c42\u89e3\u5e76\u4fdd\u5b58", None))
         self.label_calib_info.setText(QCoreApplication.translate("Form", u"\u672a\u91c7\u96c6\u3002\u70b9\u300c\u5f00\u59cb\u91c7\u96c6\u300d\uff0c\u8ba9\u68cb\u76d8\u683c\u5728\u753b\u9762\u4e2d\u53d8\u6362\u4f4d\u7f6e\u4e0e\u503e\u659c\u89d2\uff1b\u91c7\u591f 10 \u5e27\u540e\u70b9\u300c\u6c42\u89e3\u5e76\u4fdd\u5b58\u300d\u3002", None))
-        self.groupBox_enroll.setTitle(QCoreApplication.translate("Form", u"\u5efa\u6863\uff08\u7b2c\u4e09\u6b65\uff1a\u8ba9\u7a0b\u5e8f\u8bb0\u4f4f\u8fd9\u4e2a\u4eba\uff09", None))
-        self.label_enroll_hint.setText(QCoreApplication.translate("Form", u"\u8ba9\u88ab\u767b\u8bb0\u8005\u8d70\u5230\u753b\u9762\u4e2d\u95f4\uff083-10 m\uff09\uff0c\u70b9\u300c\u5f00\u59cb\u5efa\u6863\u300d\u540e\u7ad9\u5b9a\u7ea6 3 \u79d2\uff0c\u6512\u591f\u7a33\u5b9a\u7a97\u53e3\u5373\u81ea\u52a8\u8bb0\u5165\u6863\u6848\u3002\u53ef\u8fde\u7eed\u7ed9\u591a\u4eba\u5efa\u6863\uff1a\u8ba9\u4ed6\u8d70\u51fa\u753b\u9762\uff0c\u6362\u4e0b\u4e00\u4e2a\u4eba\u518d\u8d70\u8fdb\u6765\u3002", None))
+        self.groupBox_mount.setTitle(QCoreApplication.translate("Form", u"\u2461 \u91c7\u6837\u70b9\u6807\u5b9a\uff08\u5b89\u88c5\u53c2\u6570\uff09", None))
+        self.label_mount_hint.setText(QCoreApplication.translate("Form", u"\u8ba9\u76ee\u6807\u7ad9\u5230\u5377\u5c3a\u91cf\u597d\u7684\u5df2\u77e5\u8ddd\u79bb\u5904\u3001\u9759\u6b62\uff0c\u70b9\u300c\u8bb0\u4e3a\u91c7\u6837\u70b9\u300d\u3002\u63a8\u8350 2 m / 5 m / 10 m \u4e09\u70b9\uff08\u4e24\u70b9\u65e0\u6cd5\u81ea\u67e5\u9519\u8bef\u6807\u8bb0\uff09\uff0c\u7136\u540e\u70b9\u300c\u6c42\u89e3\u5b89\u88c5\u53c2\u6570\u300d\u3002", None))
+        self.label_known_dist.setText(QCoreApplication.translate("Form", u"\u5df2\u77e5\u8ddd\u79bb\uff08m\uff09\uff1a", None))
+        self.btn_mark_known.setText(QCoreApplication.translate("Form", u"\u8bb0\u4e3a\u91c7\u6837\u70b9", None))
+        self.btn_solve_mount.setText(QCoreApplication.translate("Form", u"\u6c42\u89e3\u5b89\u88c5\u53c2\u6570", None))
+        self.label_mount_status.setText(QCoreApplication.translate("Form", u"\u5c1a\u672a\u91c7\u6837 \u2014\u2014 \u70b9\u300c\u8bb0\u4e3a\u91c7\u6837\u70b9\u300d\u540e\uff0c\u8fd9\u91cc\u4f1a\u5217\u51fa\u6bcf\u4e2a\u5df2\u8bb0\u5f55\u7684\u8ddd\u79bb\u4e0e\u5e95\u8fb9\u50cf\u7d20\u3002", None))
+        self.groupBox_enroll.setTitle(QCoreApplication.translate("Form", u"\u2462 \u6307\u7eb9\u5efa\u6863\uff08\u8ba9\u7a0b\u5e8f\u8bb0\u4f4f\u8fd9\u4e2a\u4eba\uff09", None))
+        self.label_enroll_hint.setText(QCoreApplication.translate("Form", u"\u8ba9\u88ab\u767b\u8bb0\u8005\u8d70\u5230\u753b\u9762\u4e2d\u95f4\uff083-10 m\uff09\uff0c\u70b9\u300c\u5f00\u59cb\u5efa\u6863\u300d\u540e\u7ad9\u5b9a\u7ea6 3 \u79d2\uff0c\u6512\u591f\u7a33\u5b9a\u7a97\u53e3\u5373\u81ea\u52a8\u8bb0\u5165\u6863\u6848\u3002\u53ef\u8fde\u7eed\u7ed9\u591a\u4eba\u5efa\u6863\uff1a\u8ba9\u4ed6\u8d70\u51fa\u753b\u9762\uff0c\u6362\u4e0b\u4e00\u4e2a\u4eba\u518d\u8d70\u8fdb\u6765\u3002\u4e0b\u9762\u300c\u753b\u9762\u300d\u7ec4\u4f1a\u5b9e\u65f6\u663e\u793a\u53cd\u89e3\u51fa\u7684\u8eab\u9ad8/\u80a9\u5bbd\uff1b\u6570\u503c\u8d8a\u8fc7\u5408\u7406\u533a\u95f4\u4f1a\u76f4\u63a5\u5224\u5931\u8d25\u5e76\u8bf4\u660e\u539f\u56e0\uff0c\u4e0d\u4f1a\u628a\u53ef\u7591\u503c\u9759\u9ed8\u5199\u8fdb\u6863\u6848\u3002", None))
         self.label_enroll_dist.setText(QCoreApplication.translate("Form", u"\u91c7\u6837\u70b9\u8ddd\u79bb\uff08m\uff09\uff1a", None))
 #if QT_CONFIG(tooltip)
         self.spin_enroll_distance.setToolTip(QCoreApplication.translate("Form", u"\u7559 0 = \u7528\u6d4b\u8ddd\u503c\u53cd\u89e3\u8eab\u9ad8/\u80a9\u5bbd\uff08\u9700\u5148\u5b8c\u6210\u5185\u53c2 + \u5b89\u88c5\u53c2\u6570\u6807\u5b9a\uff09\uff1b\u586b\u5927\u4e8e 0 = \u7528\u8fd9\u4e2a\u624b\u586b\u8ddd\u79bb\uff0c\u7ed5\u8fc7\u6807\u5b9a\u3002\u8ddd\u79bb\u662f\u955c\u5934\u5230\u4eba\u7684\u6c34\u5e73\u8ddd\u79bb\uff0c\u5377\u5c3a\u91cf\u3002", None))
@@ -1359,19 +1484,6 @@ class Ui_Form(object):
         self.btn_enroll_toggle.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u5efa\u6863", None))
         self.label_enroll_status.setText(QCoreApplication.translate("Form", u"\u672a\u5f00\u59cb", None))
         self.label_enroll_match.setText(QCoreApplication.translate("Form", u"\u5339\u914d\uff1a\u672c\u5e27\u672a\u8ba1\u7b97", None))
-        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_setting), QCoreApplication.translate("Form", u"\u8bbe\u7f6e", None))
-        self.groupBox_rec.setTitle(QCoreApplication.translate("Form", u"\u5f55\u5236", None))
-        self.btn_rec_toggle.setText(QCoreApplication.translate("Form", u"\u5f00\u59cb\u5f55\u5236", None))
-        self.label_rec_status.setText(QCoreApplication.translate("Form", u"\u7a7a\u95f2", None))
-        self.label_rec_info.setText(QCoreApplication.translate("Form", u"\u672a\u5f55\u5236\u3002\u5f00\u59cb\u540e\u4f1a\u628a\u753b\u9762\u4e0e\u68c0\u6d4b/\u6d4b\u8ddd\u7ed3\u679c\u5206\u522b\u843d\u76d8\uff0c\u5f55\u5236\u671f\u95f4\u4e0d\u963b\u585e\u4e3b\u94fe\u8def\u3002", None))
-        self.groupBox_play.setTitle(QCoreApplication.translate("Form", u"\u56de\u653e\u5206\u6790", None))
-        self.btn_play_pick.setText(QCoreApplication.translate("Form", u"\u9009\u62e9\u5f55\u5236", None))
-        self.btn_play_toggle.setText(QCoreApplication.translate("Form", u"\u64ad\u653e", None))
-        self.btn_play_stop.setText(QCoreApplication.translate("Form", u"\u505c\u6b62", None))
-        self.label_play_pos.setText(QCoreApplication.translate("Form", u"0/0", None))
-        self.label_play_info.setText(QCoreApplication.translate("Form", u"\u672a\u9009\u62e9\u5f55\u5236\u3002\u56de\u653e\u89c6\u9891\u8f68\u4e0e\u6570\u636e\u8f68\u540c\u6b65\uff0c\u53ef\u5728\u4e0b\u65b9\u67e5\u770b\u6d4b\u8ddd\u66f2\u7ebf\u3002", None))
-        self.groupBox_play_plot.setTitle(QCoreApplication.translate("Form", u"\u6d4b\u8ddd\u66f2\u7ebf\uff08\u5f55\u5236/\u56de\u653e\uff09", None))
-        self.label_replay_summary.setText(QCoreApplication.translate("Form", u"\u5c1a\u65e0\u56de\u653e\u6570\u636e\u3002", None))
-        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_record), QCoreApplication.translate("Form", u"\u5f55\u5236\u56de\u653e", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_calib), QCoreApplication.translate("Form", u"\u6807\u5b9a", None))
     # retranslateUi
 
