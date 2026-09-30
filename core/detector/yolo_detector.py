@@ -46,7 +46,17 @@ class ModelInitThread(QThread):
             sess_options = ort.SessionOptions()
             sess_options.graph_optimization_level = \
                 ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            sess_options.intra_op_num_threads = 4      # 用 4 核做推理
+            # 线程数取 8（＝物理核数，本机 4P+4E）。2026-09-29 五组对照实测
+            # （同一进程、同一批真实录像帧、predict 端到端中位数）：
+            #   4 线程 79.4 ms  →  8 线程 66.3 ms        快 16.5%
+            #   与 ReID 旁路(2 线程)满速并发时：
+            #   4 线程 77.3 ms  →  8 线程 67.7 ms        快 12.4%
+            # 即「检测改 8 会被 ReID 抢核」不成立 —— 抢核代价只有 ±3%。
+            # 设成 12（＝逻辑核数）会让帧率腰斩，属线程超订，别这么配。
+            # ⚠️ 本文件有**两处**建 ORT 会话：此处是 ModelInitThread 的
+            #    预加载路径，下面的 load_model 是直接加载路径。改线程数
+            #    必须两处同时改，否则两条路径行为不一致。
+            sess_options.intra_op_num_threads = 8
             sess_options.inter_op_num_threads = 1
             payload['session'] = ort.InferenceSession(
                 self.model_path, sess_options,
@@ -122,7 +132,9 @@ class YOLODetector(QObject):
             import onnxruntime as ort
             sess_options=ort.SessionOptions()
             sess_options.graph_optimization_level=ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            sess_options.intra_op_num_threads=4# 使用4核CPU进行推理
+            # 8＝物理核数，与上面 ModelInitThread 的预加载路径保持一致（两处
+            # 必须同值）。理由与实测见那段注释。
+            sess_options.intra_op_num_threads=8
             sess_options.inter_op_num_threads=1
             self.session=ort.InferenceSession(self.model_path,sess_options,providers=['CPUExecutionProvider'])
             if os.path.isfile(self.label_path):

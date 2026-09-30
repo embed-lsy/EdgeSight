@@ -121,8 +121,12 @@ MIN_CROP_PX = 8
 # 原图不足 32 px 意味着放大 >8 倍，细节已不可恢复。
 MIN_BOX_H_PX = 32
 
-# 与 ``core/detector/yolo_detector.py``（intra_op_num_threads=4）保持一致，
-# 避免检测与 ReID 互相超订线程（本机 8 物理核，实测 4 线程与 8 线程无显著差异）。
+# 本默认值只影响「不显式传 threads」的调用方；实际用法都**显式传 2**
+# （建档嵌入器见 main_windows.py，录制旁路见 core/reid_probe.py）。
+# 旧注释断言「本机实测 4 线程与 8 线程无显著差异」—— 2026-09-29 重测
+# **不成立**：检测 4 → 8 线程快 16.5%（79.4 → 66.3 ms），与 OSNet 2 线程
+# 满速并发时仍快 12.4%（77.3 → 67.7 ms），抢核代价只有 ±3%。
+# 见 README「帧率」一节。
 DEFAULT_THREADS = 4
 
 EMBED_DIM = 512
