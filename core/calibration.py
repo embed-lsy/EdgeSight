@@ -106,6 +106,43 @@ def canonical_class_name(name) -> str:
     return CLASS_NAME_ALIASES.get(name.strip(), name.strip())
 
 
+# ---------------------------------------------------------------------------
+# 展示名（给人看的名字）—— 与 canonical_class_name 成对但方向相反
+# ---------------------------------------------------------------------------
+#
+# canonical 是**内部**用的规范英文名（查表、比较、字典键全按它）；
+# display 是**界面**上给人看的中文名。两者都吃「标签文件原文」这个输入。
+#
+# 为什么必须分开（2026-09-29 用户实测反馈：「目标距离分析曲线的人的曲线标签
+# 怎么是 person」）：默认标签文件是 models/labels/coco80.txt（首行 'person'），
+# 而曲线图例直接把这个内部名显示出来了 —— 同一张图上，一条线叫 'person'、
+# 另一条「无读数」线叫中文『未知』，一中一英。内部名是**实现细节**
+# （换标签文件就会变），不该泄漏进给人看的文字里。
+#
+# 惰性：没登记的名字原样返回（标签文件是用户可换的，展示层不猜、不崩）。
+CLASS_DISPLAY_NAMES = {
+    'person': '人',     # 与 models/labels/coco_labels_cn.txt 首行用词一致
+}
+
+
+def display_class_name(name) -> str:
+    """把类别名翻成界面显示用的中文名。**纯函数**。
+
+    先过 ``canonical_class_name`` 再查展示表，于是三种输入（英文标签文件
+    的 ``'person'``、中文标签文件的 ``'人'``、未加载的 ``''``）都能落到
+    同一个显示结果，且**幂等**（'人' 再翻一次还是 '人'）。
+
+    ``'未知'`` 与未登记的名字原样返回 —— 前者是「无读数」档的既有文案，
+    后者与 ``canonical_class_name`` 一样保持惰性。
+    """
+    if not isinstance(name, str):
+        return ''
+    s = name.strip()
+    if not s:
+        return ''
+    return CLASS_DISPLAY_NAMES.get(canonical_class_name(s), s)
+
+
 @dataclass
 class RangingConfig:
     """几何测距所需的、代码里看不出来的约束。

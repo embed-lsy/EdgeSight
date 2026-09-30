@@ -10,7 +10,7 @@ from core.calibration import (CameraCalibrator, CameraIntrinsics,
                               compute_box_visibility, solve_intrinsics,
                               solve_mount_params, save_mount_params,
                               load_mount_params, canonical_class_name,
-                              FootClipHysteresis)
+                              display_class_name, FootClipHysteresis)
 from core.person_model import PersonFeatureTracker, SpeedGate
 from core.ttc import TTCEstimator, TTCResult, TTCLevel, classify_ttc
 from core.ranging_filter import DistanceFilter
@@ -295,6 +295,13 @@ class MainWindow(QWidget, Ui_Form):
         # 死条目。_dist_legend_on = 当前已登记进图例的类别。
         self._dist_legend = None
         self._dist_legend_on = set()
+        # 图例文字要**单独记一份**：LegendItem 没有 rename API（要改名只能
+        # removeItem + addItem），所以得知道「现在挂着的这行字是哪一句」，
+        # 才能判断追踪目标改了 / 指纹改名了之后要不要换（见 _dist_legend_sync）。
+        # _dist_active = 当前真正有数据的类别，是图例同步的输入（也给
+        # _dist_legend_refresh 用 —— 改选目标时要能不等 analysis_timer 就刷）。
+        self._dist_legend_text = {}   # 类别 -> 当前登记在图例里的文字
+        self._dist_active = set()
         self._ttc_threshold_lines = []   # [(y, InfiniteLine, TextItem)]
         # ---- 录制/回放曲线（「测距曲线（录制/回放）」那张图）------------------
         # 2026-09-26 改版：从「加载时一次性画满 + 播放时纹丝不动」改成
@@ -378,7 +385,16 @@ class MainWindow(QWidget, Ui_Form):
         self.update_timer.timeout.connect(self.update_monitor_data)
         self.update_timer.start()
         #摄像头画面刷新定时器
+        # ⚠️ **必须显式设 PreciseTimer**。``QTimer()`` 默认是 CoarseTimer，
+        #    它会向系统时钟粒度对齐 —— Windows 的粒度是 15.625 ms，于是 33 ms
+        #    的间隔被拉到 **47.10 ms（21.23 FPS）**，这正是现场 18 个录制会话
+        #    循环率上限 21.25 的来源。同间隔换 PreciseTimer 实测 33.01 ms
+        #    （30.29 FPS）；在真实程序里改这一行实测循环 46.14 → 32.59 ms
+        #    （21.7 → 30.7 FPS）。详见 README「帧率」一节。
+        #    注意：它**只提高画面循环率**；界面「推理FPS」是检测单帧耗时的
+        #    倒数、由检测线程自己决定，不随之变化。
         self.camera_timer=QTimer()
+        self.camera_timer.setTimerType(Qt.PreciseTimer)
         self.camera_timer.setInterval(int(1000 / self.global_params.fps))
         self.camera_timer.timeout.connect(self.update_camera_frame)
         self.camera_timer.start()
@@ -569,6 +585,7 @@ class MainWindow(QWidget, Ui_Form):
         self._plot_sensor_curve_fps.setData([], [])
         for curve in self._dist_curves.values():
             curve.setData([], [])
+        self._dist_active = set()
         self._dist_legend_sync(set())   # 图例跟数据一起清，别留死条目
         # 距离图**不再画方法切换竖虚线**（2026-09-26）：竖线的标签是普通 TextItem，
         # 它的 dataBounds 返回锚点 (0,1)，被 ViewBox 当成数据点 (x, 文字位置+1)
@@ -601,6 +618,10 @@ class MainWindow(QWidget, Ui_Form):
             if d is None or d != d:            # None / NaN → 这一帧没有读数
                 frames.append((t, '未知', 0.0))
             else:
+                # 键保留**标签文件原文**（coco80.txt 给 'person'、coco_labels_cn.txt
+                # 给 '人'）—— 这是既有约定：归一化只发生在**用到它的地方**
+                # （配色走 _class_pen_color、界面文字走 display_class_name），
+                # 字典键本身不动（既有验收脚本按这个约定读 _dist_curves）。
                 frames.append((t, c or '未知', float(d)))
         series = {}     # 类别名 -> [(x, y)…]（同一类别多段之间夹 NaN 点）
         for i, (t, key, val) in enumerate(frames):
@@ -615,11 +636,17 @@ class MainWindow(QWidget, Ui_Form):
         for cls, pts in series.items():
             curve = self._dist_curves.get(cls)
             if curve is None:
+                # **不传 name=**：图例登记统一收在 _dist_legend_sync 一处。
+                # 原先 plot(name=display_class_name(cls)) 是**第二个**登记入口，
+                # 于是「刚建立」与「滚出窗口后又回来」两条路径的文案得手工对齐
+                # （2026-09-29 就是这样差点让图例退回内部名）。现在只留一个入口，
+                # 文案改由 _dist_line_label 现场判定（要跟着追踪目标走）。
+                # 字典键 / 配色仍用 cls 这个内部规范名 —— 内部名是标的（换标签
+                # 文件不变、曲线对象要能跨会话复用），显示名只是给人看。
                 curve = self.plot_target_distance.plot(
                     [], [], pen=pg.mkPen(_class_pen_color(cls), width=2),
-                    name=cls, connect='finite')
+                    connect='finite')
                 self._dist_curves[cls] = curve
-                self._dist_legend_on.add(cls)   # plot(name=) 已自动登记图例
                 if cls == '未知':
                     # 红色段压在类别线之上：拉到 0 / 回到读数的斜线务必显示红色
                     curve.setZValue(10)
@@ -627,7 +654,8 @@ class MainWindow(QWidget, Ui_Form):
         for cls, curve in self._dist_curves.items():
             if cls not in series:
                 curve.setData([], [])       # 该类别滚出窗口后清空
-        self._dist_legend_sync(set(series))     # 图例跟随类别的出现/消失
+        self._dist_active = set(series)
+        self._dist_legend_sync(self._dist_active)   # 图例跟随类别的出现/消失/改名
         # 方法信息只走下方提示行（图上不再画竖虚线，理由见 init_analysis_plots）
         # 置信度 / FPS 曲线
         self._plot_sensor_curve_conf.setData(ts, list(self.sensor_history_conf))
@@ -656,13 +684,54 @@ class MainWindow(QWidget, Ui_Form):
         else:
             self.label_conf.setText("置信度正常")
 
+    def _dist_line_label(self, cls) -> str:
+        """这条距离曲线在图例里该叫什么。**唯一**的文案出口。
+
+        用户要求（2026-09-29）：
+        > 我现在不是在做追踪吗，那距离分析曲线的标签就不应该是人或者 person，
+        > 而应该是指纹的名字 lsy
+
+        为什么「有读数」那条线可以直接写指纹名：身份拦截
+        （``_identity_reject_reason``）已经把「本帧认出的是别人 / 谁都没认出」
+        的帧一律抹成不可测，于是这条线上**只可能**是追踪目标本人的读数 ——
+        写类别名（人 / person）等于把「我们其实知道他是谁」这个信息丢掉。
+        没指定追踪目标时才退回类别显示名（「人」）。
+
+        「未知」档不受影响：它装的是被拦截的帧与没测出来的帧，那些帧没有身份
+        可言，恒显示「未知」。判据用 ``canonical_class_name``，与
+        ``_class_pen_color`` 同源（红色那条 = 未知那条），不另写一套。
+
+        ⚠️ 这是**显示层**翻译，字典键（``_dist_curves`` 的 cls）绝不动。
+        若把指纹名写进 ``class_history`` 当键会坏两件事：① 改名（lsy → 别的）
+        会让同一条线裂成两个键、图上冒出两条名字不同的线，而它们其实是同一个
+        人的连续轨迹；② 新键在 ``_class_pen_color`` 里落到「未登记类别」的
+        灰色分支 —— 人那条线会突然变灰。
+
+        ⚠️ 副作用（已知、可接受）：文字是**当前**目标的名字，所以窗口里
+        「指定追踪目标之前」那几秒的点，也会跟着被标成他。那些点原本是
+        「一个人」（未必是他）。窗口只有 ``history_len`` 帧，且追踪目标
+        通常一开始就选定；要彻底消除，得把每帧的身份记进历史（那又要面对
+        上面两条问题）。此处选择显示层方案，并把这条写进 README。
+        """
+        if canonical_class_name(cls or '未知') == '未知':
+            return display_class_name(cls)      # 无读数档恒为「未知」
+        tgt = self._person_tracker.track_target()
+        if tgt is not None and tgt.name:
+            return tgt.name
+        return display_class_name(cls)
+
     def _dist_legend_sync(self, active):
-        """距离图的图例与「当前真正有数据的类别」严格一致。
+        """距离图的图例与「当前真正有数据的类别」严格一致，且文字跟着追踪目标走。
 
         pyqtgraph 0.14 实测：``setData([], [])`` **不会**撤掉图例项
         （``LegendItem.items`` 仍持有它），于是会出现「图例说有这类目标、
         线上却没数据」的死条目。图例是给人读「这条线是什么」的，条目必须
         和线上真有数据一一对应，所以这里显式增删。
+
+        **改名必须撤了重加**：LegendItem 没有 rename API。少了这一步，
+        用户在设置页改选追踪目标（或把指纹改名 lsy → 别的）之后，图例会一直
+        停在旧名字上，而线上早就是另一个人的数据了 —— 这类「界面说的和图上
+        画的是两回事」正是本项目最容易踩的坑（同 _set_match_line 的残留值）。
         """
         if self._dist_legend is None:
             return
@@ -672,12 +741,30 @@ class MainWindow(QWidget, Ui_Form):
                 if curve is not None:
                     self._dist_legend.removeItem(curve)
                 self._dist_legend_on.discard(cls)
+                self._dist_legend_text.pop(cls, None)
         for cls in active:
+            curve = self._dist_curves.get(cls)
+            if curve is None:
+                continue
+            label = self._dist_line_label(cls)
             if cls not in self._dist_legend_on:
-                curve = self._dist_curves.get(cls)
-                if curve is not None:
-                    self._dist_legend.addItem(curve, cls)
-                    self._dist_legend_on.add(cls)
+                self._dist_legend.addItem(curve, label)
+                self._dist_legend_on.add(cls)
+                self._dist_legend_text[cls] = label
+            elif self._dist_legend_text.get(cls) != label:
+                # 目标换了 / 指纹改名了：LegendItem 无 rename API，撤了重加
+                self._dist_legend.removeItem(curve)
+                self._dist_legend.addItem(curve, label)
+                self._dist_legend_text[cls] = label
+
+    def _dist_legend_refresh(self):
+        """按**当前**追踪目标重算图例文字（不等 analysis_timer）。
+
+        改选目标 / 改名的当下就要显示对：深度分析页可能是后台，而后台
+        ``analysis_timer`` 是停的（见 on_tab_changed），``update_analysis_plots``
+        不会来刷 —— 用户切回该页时看到的会是一行旧名字。
+        """
+        self._dist_legend_sync(self._dist_active)
 
     def _refresh_ttc_hint(self):
         """TTC 分析图下方的告警提示（与监视页 TTC 同源：TTCResult → 分级）。"""
@@ -2067,6 +2154,11 @@ class MainWindow(QWidget, Ui_Form):
             w_box = target.get('width', 40)
             h_box = target.get('height', 40)
             conf = target['confidence']
+            # ⚠️ 这里**故意不套** display_class_name：框上的字由 cv2.putText 画，
+            # 它只认 Hershey 字库，写中文会渲染成一串「?」（同本方法开头
+            # 'Not Target' 那行的注释）。所以框上保留标签文件原文（默认
+            # 'person'），与 Qt 渲染的图例 /「目标类别」行（都显示「人」）
+            # 刻意不同 —— 想要框上也是中文，得改走 Qt 绘制，那是另一件事。
             name = self.global_params.target_category or '未知'
             dist = self.global_params.distance
             label = f'{name} {conf:.2f}'
@@ -2658,7 +2750,9 @@ class MainWindow(QWidget, Ui_Form):
         """
         tgt = self._person_tracker.track_target()
         if tgt is None:
-            return self.global_params.target_category or '未知'
+            # 类别名走 display_class_name：内部规范名（'person'）不进界面，
+            # 与距离曲线图例同一口径（2026-09-29 用户反馈「怎么是 person」）。
+            return display_class_name(self.global_params.target_category) or '未知'
         if self.global_params.detection_height <= 0:
             return f'{tgt.name}（画面无人）'
         active = self._person_tracker.active
@@ -2758,6 +2852,10 @@ class MainWindow(QWidget, Ui_Form):
                 combo.addItem('（尚无指纹档案）')
                 self.global_params.track_target_id = ''
                 self.btn_rename_track_target.setEnabled(False)
+                # 档案删光了 -> 已经没有追踪目标，距离曲线的图例要退回类别名
+                # （留着刚才那个人名就成了死名字）。这条早退分支原先直接 return，
+                # 会漏掉末尾那次刷新，所以这里单独补一次。
+                self._dist_legend_refresh()
                 return
             self.btn_rename_track_target.setEnabled(True)
             target = self._person_tracker.track_target()
@@ -2782,8 +2880,11 @@ class MainWindow(QWidget, Ui_Form):
         finally:
             combo.blockSignals(False)
         # 下拉重填后「追谁」可能变了（档案被删、或用户改了指定），监视页那行
-        # 跟着走 —— 它显示的可能是身份而不是类别名。
+        # 跟着走 —— 它显示的可能是身份而不是类别名。距离曲线的图例同理：
+        # 「有读数」那条线的名字现在就是追踪目标的名字（_dist_line_label），
+        # 换人 / 改名 / 取消都要立刻反映，不能等下一次 analysis_timer。
         self.refresh_target_category_label()
+        self._dist_legend_refresh()
 
     def on_track_target_changed(self, index):
         """用户在下拉里换了追踪目标：写进档案（单选）并落盘。
@@ -2797,6 +2898,7 @@ class MainWindow(QWidget, Ui_Form):
             self._person_tracker.set_track_target('')
             self.global_params.track_target_id = ''
             self.refresh_target_category_label()
+            self._dist_legend_refresh()     # 取消指定 -> 图例退回类别名「人」
             self.status_bar.showMessage('已取消追踪目标：仅跟随本帧匹配到的人', 5000)
             return
         hit = self._person_tracker.set_track_target(pid)
@@ -2808,6 +2910,7 @@ class MainWindow(QWidget, Ui_Form):
         self.global_params.track_target_id = pid
         # 立刻反映到监视页 —— 不让用户以为「选了没生效、得等下一帧」
         self.refresh_target_category_label()
+        self._dist_legend_refresh()     # 距离曲线图例：那条线现在叫他的名字
         self.status_bar.showMessage(
             f'追踪目标已指定：{hit.name}（身高 {hit.height_m:.2f} m / '
             f'肩宽 {hit.width_m:.2f} m）—— 近场宽度法改用该肩宽', 6000)
@@ -2977,7 +3080,10 @@ class MainWindow(QWidget, Ui_Form):
         if frame_bgr is None or not isinstance(box, dict):
             return None
         if self._enroll_embedder is None:
-            # 2 线程：检测占 4、reid_probe 占 2，再往上加会互相抢核（本机实测）
+            # 2 线程：OSNet 单张约 9 ms，够用且只占 2 个逻辑核。
+            # 旧注释写「检测占 4、再往上加会互相抢核（本机实测）」—— 2026-09-29
+            # 五组对照实测不成立：检测 8 线程 + OSNet 2 线程**满速并发**时，
+            # 检测单帧只慢 ±3%（噪声量级，且真实旁路是每 4 帧一次、远低于满速）。
             self._enroll_embedder = OsnetEmbedder(threads=2)
         if not self._enroll_embedder.available():
             self._enroll_last_error = f'嵌入模型缺失：{REID_MODEL_PATH}'
