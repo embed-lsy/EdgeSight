@@ -119,6 +119,30 @@ def _ttc_level_legend_name(level: TTCLevel, cfg) -> str:
     }[level]
 
 
+# ---- 人特征档案里那两个尺寸数的**显示文案** --------------------------------
+# ⚠️ 语义（2026-10-02 用户实测后定稿）：它们**不是身高 / 肩宽**，而是
+# **检测框覆盖的真实尺寸** —— 纵 = 框顶到框底，横 = 框左到框右（含手臂与衣着）。
+# 本项目检测器实测只框住身体约 1.42 m：底边在小腿（不在脚）、顶边在额头
+# （不到头顶），所以纵跨度比真人矮约 21%（1.79 → 1.4177），横跨度比肩峰宽
+# 大约 10~30%。这是**检测器的框法决定的，与标定好坏无关**，改标定也改不掉。
+#
+# 为什么必须改口径：界面原先写「身高 1.42 m」，用户拿卷尺一比差 0.37 m，
+# 会判定成标定错了 —— 实测恰恰相反，1.4177 与先验 BODY_SPAN_PRIOR_M=1.41
+# 只差 0.5%，说明建档链路是准的。错的只是**名字**。
+#
+# 内部键仍是 ``height_m`` / ``width_m``，**不许改**（JSON 存档、验收脚本、
+# ``_sync_ranging_width`` 都按它读）—— 只改给人看的那层。
+def _span_pair_text(height_m: float, width_m: float) -> str:
+    """档案尺寸数的紧凑显示（列表行 / 弹窗 / 大字共用这一个入口）。"""
+    return f'框跨度 {height_m:.2f} × {width_m:.2f} m'
+
+
+def _span_note_text() -> str:
+    """口径说明。凡是把这两个数单独摆给用户看的地方，都要带上这一句。"""
+    return ('框跨度 = 检测框覆盖的真实尺寸（纵 × 横），非身高/肩宽 ——'
+            ' 比真身高小约两成属正常')
+
+
 class CalibSolveThread(QThread):
     """把「求解相机内参」放到子线程执行。
 
@@ -229,12 +253,14 @@ class MainWindow(QWidget, Ui_Form):
         # ------------------------------------------------------------------
         # 人特征档案 + 速度门控（2026-09-25 P1+：近场宽度法的两大支柱）
         # ------------------------------------------------------------------
-        # 档案：目标完整可见、接触点法出数的帧里顺手量这个人的身高/肩宽，
-        # 稳定窗口提交后宽度法用的就是「这个人自己的肩宽」（而非默认 0.46 m），
+        # 档案：目标完整可见、接触点法出数的帧里顺手量这个人的**框跨度**
+        # （纵 = 框顶到框底、横 = 框左到框右 —— ⚠️ 不是身高/肩宽，实测比真身高
+        # 小约 0.37 m，见 ``_span_pair_text`` 的注释），稳定窗口提交后宽度法用的
+        # 就是「这个人自己的框宽度」（而非默认 0.46 m），
         # 多人靠躯干外观直方图区分。门控：人不可能瞬移，相邻读数隐含速度
         # 超过人体极限（8 m/s）的一律拦下 —— 拦的是检测跳变错值。
         # CHARTER v1.4 起，档案还承担**身份**职责：嵌入用来认人、几何用来给
-        # 近场宽度法一个「这个人自己的肩宽」。emb_tag 必须与建档时一致。
+        # 近场宽度法一个「这个人自己的框宽度」。emb_tag 必须与建档时一致。
         # 路径必须**相对仓库根**解析（2026-09-30 修复）：原先把
         # ``person_profile_path``（'models/person_profile.json'）直接交给
         # tracker，等于按**当前工作目录**解析。从别处启动程序时档案读不到，
@@ -2984,7 +3010,7 @@ class MainWindow(QWidget, Ui_Form):
         「这条档案能不能认人」取决于有没有嵌入，不该藏在详情里。"""
         mark = '★' if p.is_track_target else '　'
         emb = '嵌入✓' if p.embedding else '无嵌入'
-        return (f'{mark} {p.name}　身高 {p.height_m:.2f} m / 肩宽 {p.width_m:.2f} m'
+        return (f'{mark} {p.name}　{_span_pair_text(p.height_m, p.width_m)}'
                 f'　{emb}')
 
     def _selected_profile_id(self) -> str:
@@ -3015,14 +3041,14 @@ class MainWindow(QWidget, Ui_Form):
         lines = [
             f'档案 ID：{p.profile_id}',
             f'来源：{origin}　建档于 {p.enrolled_at or "—"}　最近更新 {p.updated_at or "—"}',
-            f'样本：{p.n_updates} 个稳定窗口（每窗口 ≥12 帧、身高 CV ≤5%）',
+            f'样本：{p.n_updates} 个稳定窗口（每窗口 ≥12 帧、框跨度 CV ≤5%）',
             f'外观嵌入：{emb}　模型 {p.emb_model or "—"}',
             f'追踪目标：{"是" if p.is_track_target else "否"}',
         ]
         if p.height_m < self._person_tracker.enroll_height_m[0] or \
                 p.height_m > self._person_tracker.enroll_height_m[1]:
             lo, hi = self._person_tracker.enroll_height_m
-            lines.append(f'⚠️ 身高 {p.height_m:.2f} m 不在 {lo:.2f}–{hi:.2f} m 内'
+            lines.append(f'⚠️ 框跨度（纵）{p.height_m:.2f} m 不在 {lo:.2f}–{hi:.2f} m 内'
                          f'（本档案建于加这道闸之前）—— 建议删掉重新建档')
         if p.source:
             lines.append(f'备注：{p.source}')
@@ -3053,11 +3079,11 @@ class MainWindow(QWidget, Ui_Form):
         extra = ''
         if p.is_track_target:
             extra = ('\n\n⚠️ 它是当前的追踪目标 —— 删除会同时取消「追踪目标」指定，'
-                     '近场宽度法将回退默认肩宽。')
+                     '近场宽度法将回退默认框宽度 0.46 m。')
         ans = QMessageBox.question(
             self, '删除这条指纹档案？',
             f'将删除：{p.name}\n'
-            f'身高 {p.height_m:.2f} m / 肩宽 {p.width_m:.2f} m　'
+            f'{_span_pair_text(p.height_m, p.width_m)}　'
             f'档案 ID：{p.profile_id}{extra}\n\n'
             f'删除会**立刻写盘、不可撤销** —— 之后要重新站到镜头前建档才能恢复。',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -3177,14 +3203,17 @@ class MainWindow(QWidget, Ui_Form):
         return f'{head} —— 已丢弃这个检测框，距离按不可测'
 
     def _sync_ranging_width(self):
-        """把「宽度法该用谁的肩宽」同步给测距器。
+        """把「宽度法该用谁的框宽度」同步给测距器。
+
+        档案里那个数叫 ``width_m``，但它是**检测框覆盖的真实宽度**（含手臂与
+        衣着），不是肩峰宽 —— 界面一律显示「框跨度·横」，见 ``_span_pair_text``。
 
         调用时机：① 每帧检测回调的**最前面**（不看本帧画面，见下）；
         ② 用户切换/取消追踪目标时（不必等下一帧，标定页也要立刻跟）。
 
         规则只有一条：**认「指定的追踪目标」**（2026-09-30 用户要求：
         「有追踪目标的时候用目标的肩宽，没有的时候就不用动」）：
-          · 指定了追踪目标        -> 该目标档案里量出的肩宽（建档的意义就在这）
+          · 指定了追踪目标        -> 该目标档案里量出的框宽度（建档的意义就在这）
           · 未指定 / 目标还没量到 -> 全局默认 0.46 m，**不借用**别人的
         见 ``PersonFeatureTracker.ranging_width_m()``。
 
@@ -3274,7 +3303,7 @@ class MainWindow(QWidget, Ui_Form):
             self.refresh_target_category_label()
             self._dist_legend_refresh()     # 取消指定 -> 图例退回类别名「人」
             self.status_bar.showMessage(
-                '已取消追踪目标：不再做身份拦截，近场宽度法改用默认肩宽 0.46 m',
+                '已取消追踪目标：不再做身份拦截，近场宽度法改用默认框宽度 0.46 m',
                 6000)
             return
         hit = self._person_tracker.set_track_target(pid)
@@ -3289,8 +3318,9 @@ class MainWindow(QWidget, Ui_Form):
         self.refresh_target_category_label()
         self._dist_legend_refresh()     # 距离曲线图例：那条线现在叫他的名字
         self.status_bar.showMessage(
-            f'追踪目标已指定：{hit.name}（身高 {hit.height_m:.2f} m / '
-            f'肩宽 {hit.width_m:.2f} m）—— 近场宽度法改用该肩宽', 6000)
+            f'追踪目标已指定：{hit.name}（'
+            f'{_span_pair_text(hit.height_m, hit.width_m)}）'
+            f'—— 近场宽度法改用该框跨度', 6000)
 
     def on_rename_track_target_clicked(self):
         """改指纹的显示名（用户可改）。名字写进档案的 ``display_name`` 并落盘。"""
@@ -3342,7 +3372,7 @@ class MainWindow(QWidget, Ui_Form):
         if manual <= 0 and not self.ranger.intrinsics.is_valid():
             QMessageBox.information(
                 self, '还不能建档',
-                '采样点距离留 0 时，身高/肩宽要靠测距值反解，而当前内参不可用。\n\n'
+                '采样点距离留 0 时，框跨度要靠测距值反解，而当前内参不可用。\n\n'
                 '两条路选一条：\n'
                 '  1. 先在本页上方「① 棋盘标定」与「② 采样点标定」做完；\n'
                 '  2. 或在上面「采样点距离」里填一个卷尺量到的距离（米），'
@@ -3379,7 +3409,7 @@ class MainWindow(QWidget, Ui_Form):
                 # 把**实时反解值**摆在最显眼处：本次那个反解成 1.22 m 的档案
                 # 之所以能悄悄存进去，就是因为建档全程看不到这个数。
                 head = (f'正在建档 {pr["samples"]}/{pr["required"]} 帧　'
-                        f'反解身高 {pr["height_m"]:.2f} m')
+                        f'反解框跨度（纵）{pr["height_m"]:.2f} m')
             else:
                 head = '正在建档：等待目标入画'
             big = head + (f'（画面里是 {pr["active_name"]}）'
@@ -3405,8 +3435,8 @@ class MainWindow(QWidget, Ui_Form):
             wlo, whi = pr['enroll_width_range']
             if pr['samples'] > 0:
                 parts.append(
-                    f'反解：身高 {pr["height_m"]:.2f} m（要求 {lo:.2f}–{hi:.2f}）／'
-                    f'肩宽 {pr["width_m"]:.2f} m（要求 {wlo:.2f}–{whi:.2f}）'
+                    f'反解：框跨度 纵 {pr["height_m"]:.2f} m（要求 {lo:.2f}–{hi:.2f}）／'
+                    f'横 {pr["width_m"]:.2f} m（要求 {wlo:.2f}–{whi:.2f}）'
                     f'　采样 {pr["samples"]}/{pr["required"]} 帧')
             if pr['block_text']:
                 parts.append(f'⚠️ {pr["block_text"]}')
@@ -3430,8 +3460,9 @@ class MainWindow(QWidget, Ui_Form):
             p = t.active
             if p is not None:
                 self._refresh_enroll_status(
-                    f'已建档 · {p.name}　身高 {p.height_m:.2f} m / '
-                    f'肩宽 {p.width_m:.2f} m')
+                    f'已建档 · {p.name}　'
+                    f'{_span_pair_text(p.height_m, p.width_m)}\n'
+                    f'{_span_note_text()}')
             else:
                 self._refresh_enroll_status(f'已建档（第 {n} 条）')
             return
@@ -3663,20 +3694,20 @@ class MainWindow(QWidget, Ui_Form):
             # 换人提示（只在新面孔出现时说一次，不刷屏）。措辞保持中性 ——
             # 这里既可能是刚建档的人，也可能是匹配上的旧档案。
             #
-            # ⚠️「近场宽度法改用该肩宽」这句**只在 p 就是追踪目标时成立**：
-            # 宽度法现在只认追踪目标的肩宽（ranging_width_m）。画面里匹配到
+            # ⚠️「近场宽度法改用该框跨度」这句**只在 p 就是追踪目标时成立**：
+            # 宽度法现在只认追踪目标的框宽度（ranging_width_m）。画面里匹配到
             # 的若是别人，测距用的仍是默认 0.46 m —— 提示必须跟实际一致，
             # 否则又是一处「界面说改了、其实没改」，与刚才修掉的那个同类。
             p = self._person_tracker.active
             key = p.profile_id if p is not None else ''
             if key and key != self._last_profile_key:
                 self._last_profile_key = key
-                tail = ('—— 近场宽度法改用该肩宽'
+                tail = ('—— 近场宽度法改用该框跨度'
                         if self._person_tracker.track_target() is p
                         else '—— 宽度法仍用默认 0.46 m（未把他指定为追踪目标）')
                 self.status_bar.showMessage(
-                    f'人员特征：{p.name}（身高 {p.height_m:.2f} m、肩宽 '
-                    f'{p.width_m:.2f} m）{tail}', 6000)
+                    f'人员特征：{p.name}（'
+                    f'{_span_pair_text(p.height_m, p.width_m)}）{tail}', 6000)
                 # 新档案进了库 -> 设置页「追踪目标选择」下拉要跟着长出来，
                 # 否则用户得等下次「应用参数」才看得见它（死列表问题）。
                 self.refresh_track_target_combo()
