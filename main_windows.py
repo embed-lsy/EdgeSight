@@ -44,6 +44,34 @@ import time
 # 所以宁可让它们不可比（跳过），也不产出无意义的分数。
 _REID_TAG = os.path.splitext(os.path.basename(REID_MODEL_PATH))[0]
 
+# ---- 摄像头掉线自愈（2026-10-02 用户实测：挂机半小时后回来，画面与检测框冻结）----
+# 根因：OpenCV 的 cap 在设备被系统挂起/重置后会**永久读不到帧**，而主循环原来
+# 是 `if not ret: return` —— 不计数、不重连、不提示，于是画面永远停在最后一帧
+# （连着上面那个检测框一起），看着就像「检测框不动、人也认不出来」。
+# 所以掉线必须能被**发现**、**自愈**、并且**让用户看见**。
+#
+# 判定阈值为什么是 10 帧：摄像头偶发的单帧读取失败是正常抖动（实测千分之几），
+# 连续 10 次（约 0.3 s）就几乎只可能是掉线。太灵敏会把正常抖动当成掉线，
+# 反复 release/open 反而把画面搞断。
+CAM_FAIL_STREAK = 10
+# 重连退避：失败后隔多久再试（指数退避，上限 30 s）。
+# 用退避而不是立刻重试，是因为设备刚掉线时驱动往往还没准备好，
+# 立刻重试大概率再失败，白占一次「打开设备」的秒级开销。
+CAM_RETRY_BASE_S = 2.0
+CAM_RETRY_MAX_S = 30.0
+# 背压：允许「正在算的那帧 + 排队的那帧」，再多就丢。
+# 为什么不无条件排队：帧是**跨线程**投递给检测器的（主线程 emit →
+# 检测器线程的事件队列）。一旦处理速度跟不上发帧速度，队列就会无限变长 ——
+# 每帧 640x480x3 约 900 KB，半小时能堆到几万帧。表现不是报错，而是
+# 「检测延迟越来越大」，用户看到的就是几帧之前的结果（框不动）。
+# 丢旧帧保实时，是这类实时链路的标准做法：宁可少算几帧，也不能让延迟发散。
+# 2 的依据：留 1 帧缓冲吸收抖动，再多的排队帧已经没有意义（结果出来就过期了）。
+MAX_INFLIGHT_FRAMES = 2
+# 检测心跳：摄像头在出帧，但超过这么久没有一次检测回调 = 检测链路失联。
+# 依据：检测器每 4 帧必回调一次（无目标时发 None，见 YOLODetector.predict），
+# 16 FPS 下约 0.25 s 一次；给 8 s 是留足「模型加载/换模型/系统卡顿」的余量。
+DET_HEARTBEAT_TIMEOUT_S = 8.0
+
 # 「已建档：xxx」这类一次性结论在标定页大字上保留的秒数。保护期内实时进度
 # 刷新的**大字**不覆盖它 —— 否则刚响完提示音，下一次节流刷新（≤5 帧）就把
 # 结论冲掉，用户根本看不到（verify_enroll_wiring 的 D/E 两项抓到过）。
@@ -60,7 +88,7 @@ def _resolve_repo_path(path: str) -> str:
 
       · 标定加载不到  -> 以「本设备未标定」运行（至少还有提示）；
       · 人特征档案加载不到 -> 档案库为空、追踪目标为 None、**身份门整条失效**，
-        近场宽度法回落默认肩宽 —— 界面一切正常，一句报错都没有。
+        近场框跨度法（横）回落默认肩宽 —— 界面一切正常，一句报错都没有。
 
     ``calib_path`` 早先已经单独打了这个补丁（见 ``load_calibration``），
     这里收成一个函数供各处共用，免得以后新加一条资源路径又漏一次。
@@ -143,6 +171,38 @@ def _span_note_text() -> str:
             ' 比真身高小约两成属正常')
 
 
+# ---- 测距方法名的**显示文案** --------------------------------------------
+# ``RangingResult.method`` 是**内部键**：建档门控按它比较
+# （``res.method in ('接触点法', '两法一致')``），所以**不许改值**。
+# 只改给人看的那层。
+#
+# ⚠️ 2026-10-02 核实更正：本机录制帧轨**不存** method —— 逐帧只落
+# distance / distance_raw / 框 / 类别 / fps。所以「改名会读不出历史录制」
+# 这个顾虑**不成立**（早先注释是这么写的，属未核实的推断）；真正不能改的
+# 理由是上面那条**运行时比较**。
+#
+# 内部名为什么叫「高度法 / 宽度法」（2026-10-02 收正**：它们用的量其实是
+# 同一件事的两头 —— 都是**检测框覆盖的真实尺寸**，只是一个取纵向（框高）、
+# 一个取横向（框宽）。CHARTER 已统一叫「框跨度」，故显示名跟着改成
+# 「框跨度法（纵）/（横）」，并保留「参考」后缀（近场降级值恒为参考级）。
+#
+# ⚠️ 下面这张表的**键必须是内部键原值**，不是显示名。踩过的坑（2026-10-02）：
+# 一次批量改名脚本把键也一起换成了显示名，于是查表永远不命中、界面原样
+# 吐出内部名 —— 看着像"改了没生效"，实则是把标的改没了。
+_METHOD_DISPLAY = {
+    '高度法': '框跨度法（纵）',
+    '宽度法(参考)': '框跨度法（横·参考）',
+    '宽度法': '框跨度法（横）',
+}
+
+
+def _method_display(method) -> str:
+    """测距方法的显示名。未登记的值原样返回（不猜、不崩）。"""
+    if not isinstance(method, str) or not method:
+        return ''
+    return _METHOD_DISPLAY.get(method.strip(), method.strip())
+
+
 class CalibSolveThread(QThread):
     """把「求解相机内参」放到子线程执行。
 
@@ -204,6 +264,14 @@ class MainWindow(QWidget, Ui_Form):
         # 初始化核心组件
         self.camera_index = 0
         self.cap = None
+        # 摄像头掉线自愈状态（见模块顶 CAM_FAIL_STREAK 那段注释）
+        self._cam_fail_streak = 0      # 连续读帧失败计数
+        self._cam_reconnecting = False  # 重连进行中：避免每帧重复起线程
+        self._cam_retry = 0            # 已重试次数（用于退避与提示）
+        self._reconnect_thread = None  # 必须持有引用，否则线程会被 GC 掉
+        self._last_detection_ts = None  # 检测心跳：最后一次收到检测结果的时间
+        self._inflight_frames = 0       # 已投给检测器、还没回调的帧数（背压用）
+        self._dropped_inference_frames = 0  # 因背压丢掉的帧数（如实计数，不静默）
         self.detector = None
         self.labels = []
         self.global_params = GlobalParams()  # 必须在init_camera前初始化
@@ -244,28 +312,28 @@ class MainWindow(QWidget, Ui_Form):
         #
         # 第三个参数是「脚是否出画」的**带记忆**判定（2026-09-26 治本）：
         # 无记忆的硬阈值会让方法在阈值线上逐帧横跳 —— 实测四个「走回镜头」
-        # 会话翻转 26/28/34/20 次，读数在宽度法 1.4 m 与接触点法假值 1.95 m
+        # 会话翻转 26/28/34/20 次，读数在框跨度法（横） 1.4 m 与接触点法假值 1.95 m
         # 之间交替，相邻帧斜率可达 3.9 m/s，TTC 与趋势估计整体被毒化。
         # 滞回在缓冲带内保持上一状态，把 N 次翻转收敛成 1 次真实过境。
         self.ranger = GeometricRanger(CameraIntrinsics(),
                                       RangingConfig.from_params(self.global_params),
                                       hysteresis=FootClipHysteresis())
         # ------------------------------------------------------------------
-        # 人特征档案 + 速度门控（2026-09-25 P1+：近场宽度法的两大支柱）
+        # 人特征档案 + 速度门控（2026-09-25 P1+：近场框跨度法（横）的两大支柱）
         # ------------------------------------------------------------------
         # 档案：目标完整可见、接触点法出数的帧里顺手量这个人的**框跨度**
         # （纵 = 框顶到框底、横 = 框左到框右 —— ⚠️ 不是身高/肩宽，实测比真身高
-        # 小约 0.37 m，见 ``_span_pair_text`` 的注释），稳定窗口提交后宽度法用的
+        # 小约 0.37 m，见 ``_span_pair_text`` 的注释），稳定窗口提交后框跨度法（横）用的
         # 就是「这个人自己的框宽度」（而非默认 0.46 m），
         # 多人靠躯干外观直方图区分。门控：人不可能瞬移，相邻读数隐含速度
         # 超过人体极限（8 m/s）的一律拦下 —— 拦的是检测跳变错值。
         # CHARTER v1.4 起，档案还承担**身份**职责：嵌入用来认人、几何用来给
-        # 近场宽度法一个「这个人自己的框宽度」。emb_tag 必须与建档时一致。
+        # 近场框跨度法（横）一个「这个人自己的框宽度」。emb_tag 必须与建档时一致。
         # 路径必须**相对仓库根**解析（2026-09-30 修复）：原先把
         # ``person_profile_path``（'models/person_profile.json'）直接交给
         # tracker，等于按**当前工作目录**解析。从别处启动程序时档案读不到，
         # 而失败方式是静默的 —— ``load()`` 找不到文件就 return，档案库为空、
-        # 追踪目标 None、身份门整条失效、近场宽度法回落 0.46，界面零提示。
+        # 追踪目标 None、身份门整条失效、近场框跨度法（横）回落 0.46，界面零提示。
         # 与 ``_calib_file`` 同款（那边早先已修，这边漏了）。
         self._person_tracker = PersonFeatureTracker(
             _resolve_repo_path(self.global_params.person_profile_path),
@@ -467,6 +535,13 @@ class MainWindow(QWidget, Ui_Form):
         self.resource_timer.setInterval(1000)
         self.resource_timer.timeout.connect(self.update_resource_usage)
         self.resource_timer.start()
+        # 看门狗：1 秒一次，查检测链路心跳。
+        # 摄像头掉线由主循环自己发现（update_camera_frame），但「画面在动、
+        # 检测却不出结果」这种只有它能抓到 —— 用户看到的同样是「框不动」。
+        self.watchdog_timer=QTimer()
+        self.watchdog_timer.setInterval(1000)
+        self.watchdog_timer.timeout.connect(self._check_detection_heartbeat)
+        self.watchdog_timer.start()
 
     
     def init_ui(self):
@@ -732,7 +807,8 @@ class MainWindow(QWidget, Ui_Form):
         if hasattr(self, 'label_method_prompt'):
             m = self.method_history[-1] if self.method_history else None
             if m and m != '不可测':
-                self.label_method_prompt.setText(f'当前测距方法：{m}')
+                self.label_method_prompt.setText(
+                    f'当前测距方法：{_method_display(m)}')
             elif m == '不可测':
                 self.label_method_prompt.setText(
                     '当前测距方法：不可测（原因见监视页读数下方）')
@@ -1679,7 +1755,7 @@ class MainWindow(QWidget, Ui_Form):
             return res.reason
         h = self.global_params.camera_height
         if h <= 0:
-            return ('未填相机安装高度：只能对完整可见的目标测距（高度法）。\n'
+            return ('未填相机安装高度：只能对完整可见的目标测距（框跨度法）。\n'
                     '可以用卷尺量一次镜头中心到地面的高度填上，也可以在'
                     '「安装参数自标定」里把目标摆到已知距离反解出来；\n'
                     '填好后即可对部分可见的目标测距（如头顶出画的人）。')
@@ -1707,7 +1783,7 @@ class MainWindow(QWidget, Ui_Form):
 
         显示规则（与离线分析同一套分级语义）：
 
-        - **可用**：``TTC x.x s（分级）``。参考级（近场宽度法距离 < 约 2 m）
+        - **可用**：``TTC x.x s（分级）``。参考级（近场框跨度法（横）距离 < 约 2 m）
           额外加「？」，与距离读数的参考值标记同款 —— 不冒充精确值；
         - **不可用**：值落回 ``--``，原因小字给出**为什么**（样本不足 /
           未在接近 / 本帧离群 / 测距不可用…）。无目标时原因也清空 ——
@@ -1722,7 +1798,7 @@ class MainWindow(QWidget, Ui_Form):
                 txt += ' ？'
             self.label_ttc_value.setText(txt)
             self.label_ttc_reason.setText(
-                '参考级：近场宽度法距离算出的碰撞时间（±15% 起步），'
+                '参考级：近场框跨度法（横）距离算出的碰撞时间（±15% 起步），'
                 '仅供参考' if res.is_reference else '')
         else:
             self.label_ttc_value.setText('--')
@@ -1751,7 +1827,7 @@ class MainWindow(QWidget, Ui_Form):
         ② **本帧目标自己的原因**（``RangingResult.reason``）—— 「脚被画面下边界
            裁掉（目标太近）」「框底边落在相机水平线以上，不可能踩在地面上」等；
         ③ **正常出数** —— 报出所用方法，让人知道这个数是靠哪条路给的
-           （接触点法靠脚，高度法靠全身框 + 登记身高）。
+           （接触点法靠脚，框跨度法靠全身框 + 档案里量出的框跨度）。
         """
         if not self.global_params.calibrated:
             why = self.global_params.invalid_reason or '未标定'
@@ -1759,7 +1835,7 @@ class MainWindow(QWidget, Ui_Form):
         if res is not None and res.reason:
             return res.reason
         if res is not None and res.distance is not None:
-            return f'（{res.method}）'
+            return f'（{_method_display(res.method)}）'
         return ''
 
     # ------------------------------------------------------------------
@@ -3079,7 +3155,7 @@ class MainWindow(QWidget, Ui_Form):
         extra = ''
         if p.is_track_target:
             extra = ('\n\n⚠️ 它是当前的追踪目标 —— 删除会同时取消「追踪目标」指定，'
-                     '近场宽度法将回退默认框宽度 0.46 m。')
+                     '近场框跨度法（横）将回退默认框宽度 0.46 m。')
         ans = QMessageBox.question(
             self, '删除这条指纹档案？',
             f'将删除：{p.name}\n'
@@ -3203,7 +3279,7 @@ class MainWindow(QWidget, Ui_Form):
         return f'{head} —— 已丢弃这个检测框，距离按不可测'
 
     def _sync_ranging_width(self):
-        """把「宽度法该用谁的框宽度」同步给测距器。
+        """把「框跨度法（横）该用谁的框宽度」同步给测距器。
 
         档案里那个数叫 ``width_m``，但它是**检测框覆盖的真实宽度**（含手臂与
         衣着），不是肩峰宽 —— 界面一律显示「框跨度·横」，见 ``_span_pair_text``。
@@ -3303,7 +3379,7 @@ class MainWindow(QWidget, Ui_Form):
             self.refresh_target_category_label()
             self._dist_legend_refresh()     # 取消指定 -> 图例退回类别名「人」
             self.status_bar.showMessage(
-                '已取消追踪目标：不再做身份拦截，近场宽度法改用默认框宽度 0.46 m',
+                '已取消追踪目标：不再做身份拦截，近场框跨度法（横）改用默认框宽度 0.46 m',
                 6000)
             return
         hit = self._person_tracker.set_track_target(pid)
@@ -3320,7 +3396,7 @@ class MainWindow(QWidget, Ui_Form):
         self.status_bar.showMessage(
             f'追踪目标已指定：{hit.name}（'
             f'{_span_pair_text(hit.height_m, hit.width_m)}）'
-            f'—— 近场宽度法改用该框跨度', 6000)
+            f'—— 近场框跨度法（横）改用该框跨度', 6000)
 
     def on_rename_track_target_clicked(self):
         """改指纹的显示名（用户可改）。名字写进档案的 ``display_name`` 并落盘。"""
@@ -3515,13 +3591,19 @@ class MainWindow(QWidget, Ui_Form):
 
             
     def on_detection_ready(self,target):#检测结果回调
+        # 检测心跳：无论有没有目标都打点。predict 末尾是无条件 emit，
+        # 所以「长时间没打点」= 链路断了，不是「画面里没人」。
+        self._last_detection_ts = time.monotonic()
+        # 一帧已出结果，释放一个在途名额（背压的另一半）
+        if self._inflight_frames > 0:
+            self._inflight_frames -= 1
 
         # 本帧的「不是追踪目标」说明先清空，由下面的身份判定重新写。
         # 不清就会停在上一次的结论上：画面里的框已经没了，红字却还写着
         # 「非追踪目标」，或者反过来 —— 残留结论比不显示更容易骗人。
         self._identity_reject_note = None
 
-        # 宽度法用谁的肩宽：每帧先定一次（不看本帧画面，理由见 _sync_ranging_width）
+        # 框跨度法（横）用谁的肩宽：每帧先定一次（不看本帧画面，理由见 _sync_ranging_width）
         self._sync_ranging_width()
 
         if target and target['confidence']>=self.global_params.confidence_thres:# 增加置信度过滤，低于阈值视为无目标
@@ -3666,7 +3748,7 @@ class MainWindow(QWidget, Ui_Form):
                     bits.append('距离解算不可信' +
                                 (f'（{res.reason}）' if res.reason else ''))
                 elif res is not None and res.method not in ('接触点法', '两法一致'):
-                    bits.append(f'当前测距走的是「{res.method}」，'
+                    bits.append(f'当前测距走的是「{_method_display(res.method)}」，'
                                 f'建档要求接触点法')
             capture_note = '；'.join(bits)
 
@@ -3694,17 +3776,17 @@ class MainWindow(QWidget, Ui_Form):
             # 换人提示（只在新面孔出现时说一次，不刷屏）。措辞保持中性 ——
             # 这里既可能是刚建档的人，也可能是匹配上的旧档案。
             #
-            # ⚠️「近场宽度法改用该框跨度」这句**只在 p 就是追踪目标时成立**：
-            # 宽度法现在只认追踪目标的框宽度（ranging_width_m）。画面里匹配到
+            # ⚠️「近场框跨度法（横）改用该框跨度」这句**只在 p 就是追踪目标时成立**：
+            # 框跨度法（横）现在只认追踪目标的框宽度（ranging_width_m）。画面里匹配到
             # 的若是别人，测距用的仍是默认 0.46 m —— 提示必须跟实际一致，
             # 否则又是一处「界面说改了、其实没改」，与刚才修掉的那个同类。
             p = self._person_tracker.active
             key = p.profile_id if p is not None else ''
             if key and key != self._last_profile_key:
                 self._last_profile_key = key
-                tail = ('—— 近场宽度法改用该框跨度'
+                tail = ('—— 近场框跨度法（横）改用该框跨度'
                         if self._person_tracker.track_target() is p
-                        else '—— 宽度法仍用默认 0.46 m（未把他指定为追踪目标）')
+                        else '—— 框跨度法（横）仍用默认 0.46 m（未把他指定为追踪目标）')
                 self.status_bar.showMessage(
                     f'人员特征：{p.name}（'
                     f'{_span_pair_text(p.height_m, p.width_m)}）{tail}', 6000)
@@ -3913,13 +3995,107 @@ class MainWindow(QWidget, Ui_Form):
         self.lcd_fps.display(self.global_params.fps)
         self.lcd_reasoning.display(self.global_params.inference_fps)
 
+    # -- 摄像头掉线自愈 -------------------------------------------------------
+    def _note_camera_lost(self, reason):
+        """发现摄像头失联：放掉旧句柄、给用户看得见的提示、起线程重连。"""
+        if self._cam_reconnecting:
+            return                      # 已经在重连了，别每帧重复起线程
+        self._cam_reconnecting = True
+        self._cam_retry += 1
+        # ⚠️ 旧句柄必须先放掉：DirectShow 是独占的，不 release 就去开新的，
+        #    新句柄必然打不开（设备忙），重连就永远失败。
+        try:
+            if self.cap is not None:
+                self.cap.release()
+        except Exception:
+            pass
+        self.cap = None
+        self._show_camera_banner(
+            f'摄像头无画面（{reason}）\n正在重连…（第 {self._cam_retry} 次）')
+        self.status_bar.showMessage(
+            f'摄像头无画面：{reason}，正在重连（第 {self._cam_retry} 次）', 10000)
+        self._start_camera_reconnect()
+
+    def _start_camera_reconnect(self):
+        """在子线程里重开摄像头 —— 打开要秒级（后端重试更久），不能堵主循环。"""
+        th = CameraInitThread(self.camera_index, self.global_params.fps)
+        th.init_finished.connect(
+            lambda ok, msg: self._on_camera_reopened(ok, msg, th))
+        self._reconnect_thread = th      # 必须持有引用，否则线程会被 GC
+        th.start()
+
+    def _on_camera_reopened(self, success, message, thread):
+        if success:
+            self.cap = thread.cap
+            self._cam_reconnecting = False
+            self._cam_fail_streak = 0
+            self._cam_retry = 0
+            self._reconnect_thread = None
+            self.status_bar.showMessage(f'摄像头已恢复：{message}', 5000)
+            # 驱动重置后分辨率可能回到默认，内参是否还适用要重新判一次
+            try:
+                self.verify_calibration_against_frame()
+            except Exception:
+                pass
+            return
+        # 失败：指数退避后重试。不立刻重试，是因为设备刚掉线时驱动多半还没
+        # 准备好，立刻开大概率再失败，白付一次秒级的打开开销。
+        delay = min(CAM_RETRY_BASE_S * (2 ** (self._cam_retry - 1)),
+                    CAM_RETRY_MAX_S)
+        self._show_camera_banner(
+            f'摄像头无画面\n重连失败（第 {self._cam_retry} 次），'
+            f'{delay:.0f} 秒后重试')
+        self.status_bar.showMessage(
+            f'摄像头重连失败（第 {self._cam_retry} 次），{delay:.0f} s 后重试',
+            10000)
+        QTimer.singleShot(int(delay * 1000), self._start_camera_reconnect)
+
+    def _show_camera_banner(self, text):
+        """画面区大字提示。QLabel 有 pixmap 时 setText 不显示，必须先 clear。"""
+        for lbl in (getattr(self, 'lbl_process', None),
+                    getattr(self, 'lbl_original', None)):
+            if lbl is None:
+                continue
+            try:
+                lbl.clear()
+                lbl.setText(text)
+            except Exception:
+                pass
+
+    def _check_detection_heartbeat(self):
+        """摄像头在出帧，但检测链路长时间没有结果 —— 要说出来，不能装作正常。
+
+        依据：检测器每 4 帧**必**回调一次（没目标时发 None，见
+        ``YOLODetector.predict`` 末尾的无条件 emit），所以「长时间没回调」
+        只可能是链路断了，不是「画面里没人」。
+        """
+        if (self.cap is None or self.detector is None or self.is_loading_model
+                or self._last_detection_ts is None):
+            return
+        gap = time.monotonic() - self._last_detection_ts
+        if gap > DET_HEARTBEAT_TIMEOUT_S:
+            # 顺手松开背压：在途计数若因为「回调没回来」卡住，不重置的话
+            # 就永远不再投帧了 —— 那么看门狗自己反倒成了新的死锁。
+            if self._inflight_frames > 0:
+                self._inflight_frames = 0
+            self.status_bar.showMessage(
+                f'检测链路无响应：已 {gap:.0f} s 没有新的检测结果', 3000)
+
     def update_camera_frame(self):
+        # 掉线自愈（2026-10-02）：cap 为 None / 已关闭 / 连续读不到帧，都走
+        # 看门狗。原先这里三处都是「静默 return」—— 挂机半小时后设备被系统
+        # 挂起，画面就永远停在最后一帧，用户回来看到的就是「框不动、认不出人」。
         if self.cap is None or not self.cap.isOpened():
+            self._note_camera_lost('摄像头未打开')
             return
 
         ret, frame = self.cap.read()
         if not ret:
+            self._cam_fail_streak += 1
+            if self._cam_fail_streak >= CAM_FAIL_STREAK:
+                self._note_camera_lost('摄像头读不到画面')
             return
+        self._cam_fail_streak = 0
         try:
             # 标定采集中：把当前帧喂给标定器，不改动显示逻辑。
             # ⚠️ 门条件必须是「采集中且标定器存在」，不能只看 calibrator 是否为 None：
@@ -3945,6 +4121,12 @@ class MainWindow(QWidget, Ui_Form):
         if self.detector and self.detector_thread.isRunning() and not self.is_loading_model:
             self.frame_counter+=1
             if self.frame_counter % (self.inference_interval + 1) == 0:
+                # 背压（见模块顶 MAX_INFLIGHT_FRAMES）：处理不过来就丢这一帧，
+                # 而不是让它排进队列把延迟越拖越大。丢多少如实计数，不静默。
+                if self._inflight_frames >= MAX_INFLIGHT_FRAMES:
+                    self._dropped_inference_frames += 1
+                    return
+                self._inflight_frames += 1
                 self.frame_signal.emit(frame_rgb.copy())
 
     def closeEvent(self, event):
@@ -3965,6 +4147,14 @@ class MainWindow(QWidget, Ui_Form):
                 pass
             print('[标定] 关闭时等待求解线程结束……')
             th.wait()
+        # 摄像头重连线程可能正卡在后端重试（十几秒），关窗前必须断开并等它
+        rt = getattr(self, '_reconnect_thread', None)
+        if rt is not None and rt.isRunning():
+            try:
+                rt.init_finished.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            rt.wait(3000)
         # 设备枚举线程（兜底通路走 PowerShell，可能正卡在几秒的查询上）
         it = getattr(self, '_identify_thread', None)
         if it is not None and it.isRunning():
@@ -3992,9 +4182,10 @@ class MainWindow(QWidget, Ui_Form):
         if self.replayer is not None:
             self.replayer.close()
             self.replayer = None
-        # 停止所有定时器
-        for timer in [self.update_timer, self.camera_timer, self.analysis_timer]:
-            if timer.isActive():
+        # 停止所有定时器（含看门狗，否则回调会打到已销毁的控件）
+        for timer in [self.update_timer, self.camera_timer, self.analysis_timer,
+                      getattr(self, 'watchdog_timer', None)]:
+            if timer is not None and timer.isActive():
                 timer.stop()
         # 释放摄像头
         if self.cap is not None and self.cap.isOpened():

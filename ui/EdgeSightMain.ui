@@ -1839,7 +1839,7 @@ QLineEdit, QTextEdit {
               <item>
                <widget class="QLabel" name="label_enroll_hint">
                 <property name="text">
-                 <string>让被登记者走到画面中间（3-10 m），点「开始建档」后站定约 3 秒，攒够稳定窗口即自动记入档案。可连续给多人建档：让他走出画面，换下一个人再走进来。下面「画面」组会实时显示反解出的身高/肩宽；数值越过合理区间会直接判失败并说明原因，不会把可疑值静默写进档案。</string>
+                 <string>让被登记者走到画面中间（3-10 m），点「开始建档」后站定约 3 秒，攒够稳定窗口即自动记入档案。可连续给多人建档：让他走出画面，换下一个人再走进来。下面「画面」组会实时显示反解出的框跨度（纵 / 横）；数值越过合理区间会直接判失败并说明原因，不会把可疑值静默写进档案。</string>
                 </property>
                 <property name="wordWrap">
                  <bool>true</bool>
@@ -1858,7 +1858,7 @@ QLineEdit, QTextEdit {
                 <item>
                  <widget class="QDoubleSpinBox" name="spin_enroll_distance">
                   <property name="toolTip">
-                   <string>留 0 = 用测距值反解身高/肩宽（需先完成内参 + 安装参数标定）；填大于 0 = 用这个手填距离，绕过标定。距离是镜头到人的水平距离，卷尺量。</string>
+                   <string>留 0 = 用测距值反解框跨度（需先完成内参 + 安装参数标定）；填大于 0 = 用这个手填距离，绕过标定。距离是镜头到人的水平距离，卷尺量。</string>
                   </property>
                   <property name="decimals">
                    <number>2</number>

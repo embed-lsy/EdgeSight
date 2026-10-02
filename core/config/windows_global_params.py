@@ -70,7 +70,7 @@ class GlobalParams:
         self.height_tolerance=0.35           # 反解身高判据的容差：落在 ±35% 内视为合理
         self.object_heights=dict(_OBJECT_HEIGHTS_DEFAULT)
         self.min_pixel_height=8              # 像素高度下限，低于此值不测距
-        # 宽度法（近场参考值，2026-09-25 P1+）：脚出画、左右未裁时的兜底测法
+        # 框跨度法（横）（近场参考值，2026-09-25 P1+）：脚出画、左右未裁时的兜底测法
         # Z = fx * 肩宽 / 框宽。肩宽取自哪里只有两条分支（2026-09-30 收紧，
         # 见 PersonFeatureTracker.ranging_width_m 与 MainWindow._sync_ranging_width）：
         #   · 指定了追踪目标 -> 该目标档案（person_profile.json）里量出的肩宽；
