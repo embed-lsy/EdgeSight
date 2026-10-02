@@ -316,12 +316,17 @@
       <strong>不做追踪</strong> —— 就算你还没指定追踪目标、或者站的不是被追踪的那个人，
       框和距离照常出现（详见 §3.5.2 末尾那个对照表）。
     </div>
-    在 ② 组里找到 <span class="kbd">已知距离（m）</span>：
+    先确认 ② 组的 <span class="kbd">距离来源</span>，默认 <strong>「只量第 1 个距离，其余自动推」</strong>：
+    <strong>只有第 1 个点要拿卷尺量</strong>，之后换位置站着点就行 ——
+    <strong>不用再量</strong>（输入框会自动置灰），但<strong>必须换到明显不同的距离站好</strong>。
+    然后找到 <span class="kbd">已知距离（m）</span>：
     <ul>
       <li>让人站到 <strong>2 米</strong> 标记上、<strong>站直别动</strong>，
         把 <span class="kbd">已知距离</span> 改成 <code>2.00</code>，点 <span class="kbd">记为采样点</span>；
         等 1 秒，下面那行提示会告诉你采到多少帧、底边像素散布多少。</li>
-      <li>换到 <strong>5 米</strong>（改成 <code>5.00</code> 再点一次），再到 <strong>10 米</strong>（<code>10.00</code>）。</li>
+      <li>换到 <strong>5 米</strong>：这时 <span class="kbd">已知距离</span> 已自动置灰，
+        <strong>不用量、不用改数字</strong>，站定直接再点一次 <span class="kbd">记为采样点</span>；
+        再到 <strong>10 米</strong> 同样点一次。</li>
       <li>三个点都记好后，点 <span class="kbd">求解安装参数</span>。弹窗里会给出
         <strong>相机安装高度、俯仰角、以及各自的不确定度</strong>（例如 <code>±0.5 cm / ±0.08°</code>），
         并自动填进安装参数、<strong>立即生效</strong>（② 组下面那行状态字会写出解出的高度与俯仰角）。</li>
@@ -330,7 +335,12 @@
       <strong>为什么推荐点三次而不是两次：</strong>两点的方程有两个解（"低装 + 小平角"和"高装 + 大俯角"都吻合），
       而且两点永远能<strong>严格拟合</strong>，所以查不出"把膝盖当成脚标了"这类错；三点就有富余，能靠残差自查。<br>
       <strong>常见情况：</strong>提示"散布偏大"= 人还在动，让他站稳重采一次就行；
-      提示"距离太接近"= 两个标记太近，拉开差距（比如 2 m 和 10 m）。
+      提示"距离太接近"= 两个标记太近，拉开差距（比如 2 m 和 10 m）。<br><br>
+      <strong>「不用量」≠「顺便站」：</strong>第 2、3 个点不用拿尺子，
+      但<strong>必须换到明显不同的距离</strong>（至少比已采的点远 1/4）。
+      原地不动再点一次会被当成同一点<strong>覆盖</strong>掉；只挪一点点则跨度不够，
+      高度与俯仰角会互相顶替、解出来的值乱跳。<strong>全程同一个人、同样站姿</strong>
+      即可 —— 其余点的距离按框高比推，人有多高在比值里会抵消掉。
     </div>
   </li>
   <li>然后才是正式测距：让那个人站在 <strong>2 米</strong> 标记处，面向摄像头<strong>站直</strong>。</li>

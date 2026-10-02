@@ -1,4 +1,6 @@
-from PySide6.QtWidgets import QApplication,QPushButton,QBoxLayout,QWidget,QGroupBox,QLabel,QMessageBox,QFileDialog,QStatusBar,QInputDialog
+from PySide6.QtWidgets import (QApplication,QPushButton,QBoxLayout,QWidget,QGroupBox,QLabel,
+                               QMessageBox,QFileDialog,QStatusBar,QInputDialog,
+                               QCheckBox,QDoubleSpinBox,QHBoxLayout,QComboBox)
 from PySide6.QtCore import Qt,Slot,QTimer,QThread,Signal,QObject
 from PySide6.QtGui import QIcon,QPixmap,QImage
 from ui.Ui_EdgeSightMain import Ui_Form
@@ -10,7 +12,9 @@ from core.calibration import (CameraCalibrator, CameraIntrinsics,
                               compute_box_visibility, solve_intrinsics,
                               solve_mount_params, save_mount_params,
                               load_mount_params, canonical_class_name,
-                              display_class_name, FootClipHysteresis)
+                              display_class_name, FootClipHysteresis,
+                              distances_from_box_height, BODY_SPAN_PRIOR_M,
+                              BODY_SPAN_PRIOR_REL_SIGMA)
 from core.person_model import PersonFeatureTracker, SpeedGate
 from core.ttc import TTCEstimator, TTCResult, TTCLevel, classify_ttc
 from core.ranging_filter import DistanceFilter
@@ -44,6 +48,26 @@ _REID_TAG = os.path.splitext(os.path.basename(REID_MODEL_PATH))[0]
 # 刷新的**大字**不覆盖它 —— 否则刚响完提示音，下一次节流刷新（≤5 帧）就把
 # 结论冲掉，用户根本看不到（verify_enroll_wiring 的 D/E 两项抓到过）。
 _ENROLL_BIG_HOLD_S = 5.0
+
+
+def _resolve_repo_path(path: str) -> str:
+    """把「相对仓库根」的资源路径解析成绝对路径（本来就是绝对的则原样返回）。
+
+    项目里所有资源路径都写成相对形式（``models/calib.json``、
+    ``models/person_profile.json``），而它们相对的是**仓库根**，不是
+    「当前工作目录」。从别处启动程序（快捷方式、IDE、桌面双击、别的项目
+    的工作目录）时相对路径会解析到别的地方，而各处的失败方式**全是静默的**：
+
+      · 标定加载不到  -> 以「本设备未标定」运行（至少还有提示）；
+      · 人特征档案加载不到 -> 档案库为空、追踪目标为 None、**身份门整条失效**，
+        近场宽度法回落默认肩宽 —— 界面一切正常，一句报错都没有。
+
+    ``calib_path`` 早先已经单独打了这个补丁（见 ``load_calibration``），
+    这里收成一个函数供各处共用，免得以后新加一条资源路径又漏一次。
+    """
+    if os.path.isabs(path):
+        return path
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
 
 
 # ---------------------------------------------------------------------------
@@ -211,8 +235,14 @@ class MainWindow(QWidget, Ui_Form):
         # 超过人体极限（8 m/s）的一律拦下 —— 拦的是检测跳变错值。
         # CHARTER v1.4 起，档案还承担**身份**职责：嵌入用来认人、几何用来给
         # 近场宽度法一个「这个人自己的肩宽」。emb_tag 必须与建档时一致。
+        # 路径必须**相对仓库根**解析（2026-09-30 修复）：原先把
+        # ``person_profile_path``（'models/person_profile.json'）直接交给
+        # tracker，等于按**当前工作目录**解析。从别处启动程序时档案读不到，
+        # 而失败方式是静默的 —— ``load()`` 找不到文件就 return，档案库为空、
+        # 追踪目标 None、身份门整条失效、近场宽度法回落 0.46，界面零提示。
+        # 与 ``_calib_file`` 同款（那边早先已修，这边漏了）。
         self._person_tracker = PersonFeatureTracker(
-            self.global_params.person_profile_path,
+            _resolve_repo_path(self.global_params.person_profile_path),
             emb_match_threshold=self.global_params.reid_match_threshold,
             emb_tag=_REID_TAG)
         # 路人池归一化（cohort）**默认关**，此处刻意不传 cohort_enabled ——
@@ -363,6 +393,10 @@ class MainWindow(QWidget, Ui_Form):
         self._plot_sensor_curve_fps = self.plot_sensor_fps.plot([], [], pen=pg.mkPen('y', width=2), name="检测框FPS")
         #信号绑定
         self.bind_model_thres_widgets_realtime()#实时生效
+        self._build_dist_source_row()    # 最靠前：先决定「距离从哪来」
+        # ⚠️ 这里**不再**建「已知相机高度」「框底边不在脚上（同时解抬升量）」
+        # 两行 —— 2026-10-01 下线，原因见 _build_dist_source_row 的 docstring。
+        # 标定只剩一条路：自标定，解 (落差, 俯仰角) 两个未知数。
         self.bind_calibration_widgets()#仅标定时生效
         self.bind_buttons()
         self.bind_other()
@@ -816,11 +850,124 @@ class MainWindow(QWidget, Ui_Form):
         self.slider_confidence_thres.valueChanged.connect(lambda v: self.update_param_realtime("confidence_thres", v/100, self.label_confidence_thres, "%.1f"))
         self.slider_nms_thres.valueChanged.connect(lambda v: self.update_param_realtime("nms_thres", v/100, self.label_nms_thres, "%.1f"))
 
+    # 采样点的「距离从哪来」—— 决定用户要不要拿尺子
+    DIST_MODE_ALL_MEASURED = 0   # 每个距离都用卷尺量
+    DIST_MODE_ONE_MEASURED = 1   # 只量第 1 个，其余按框高比推
+    DIST_MODE_NONE = 2           # 一个都不量（全自动）
+
+    def _build_dist_source_row(self):
+        """标定页 ② 组加一行「距离怎么来」—— 决定用户要不要拿尺子。
+
+        为什么必须有这一行
+        ------------------
+        相机只能读到**角度**，读不到米。同一个画面既可以是「近处的小目标」，
+        也可以是「远处的大目标」（尺度歧义，图像完全相同）。要把角度换算成米，
+        必须有且只有一个绝对尺度来源：要么用户拿尺子量一个距离，要么靠
+        「人大概有多大」这个先验。这一行就是让用户选尺度从哪来。
+
+        三档的实测精度（2026-10-01 Monte Carlo：4000 次，框底/框顶各 1 px 噪声）
+        ------------------------------------------------------------------------
+            每个距离都量    95% 分位 |误差| 2.3%
+            只量第 1 个     95% 分位 |误差| 2.4%   ← 与上一档几乎一样好
+            一个都不量      95% 分位 |误差| 19.9%
+
+        第二档为什么能追平第一档：其余点的距离按**框高比**推
+        ``Z_i = Z_锚 × 框高_锚 / 框高_i``，比值里人体尺寸先验**完全抵消**，
+        精度只受像素噪声 —— 实测由 4 m 推 5 m 偏差 0.004%。
+
+        第三档的误差是**整体缩放**（各距离同一百分比），因为它完全来自
+        「框覆盖的真实长度 ≈ ?」这个先验。换个高矮不同的人就可能偏这么多，
+        这不是算法能修的；量一个真值距离就能把它整个消掉。
+
+        ⚠️ 本行是**代码里动态建**的（不重新生成 Ui_*.py）。
+
+        ⚠️ 2026-10-01 下线了另外两行（「已知相机高度（卷尺量）」「框底边不在
+        脚上（同时解抬升量）」），标定只剩自标定一条路。下线原因：
+        ----------------------------------------------------------------
+        填相机高度**不提升**测距精度，却把人带进「公式里的高度 = 卷尺量到的
+        安装高度」这个错误概念。公式要的是「相机到**框底边对应位置**的垂直
+        落差」，只有框底边贴地时才等于安装高度；本项目实测两者差 0.25 m。
+        勾了已知高度、只解俯仰角时，那段偏移会被**整个吸进角度**：解出的
+        pitch=2.5°（真值 −0.9°），4 m 标定后 5 m 读 4.72（−5.6%）。
+        自标定直接把落差解出来，绕开了这个坑，也不需要用户量高度。
+        """
+        self.combo_dist_source = QComboBox(self)
+        self.combo_dist_source.addItems([
+            '每个距离都用卷尺量（约 ±1%）',
+            '只量第 1 个距离，其余自动推（约 ±1%）',
+            '一个都不量 · 全自动（约 ±10%）',
+        ])
+        self.combo_dist_source.setCurrentIndex(self.DIST_MODE_ONE_MEASURED)
+        self.combo_dist_source.setToolTip(
+            '决定每个采样点的「已知距离」从哪来。\n\n'
+            '· 只量第 1 个（推荐）：第 1 个点站到卷尺量好的位置（比如地上贴条\n'
+            '  胶带标 4 m），之后换几个距离站着点「记为采样点」就行，不用再量。\n'
+            '  程序按框高比推出其余点的距离 —— 实测精度与「每个都量」相同。\n\n'
+            '· 一个都不量：连一个距离都不用知道，站几个不同位置各点一次即可。\n'
+            '  代价是尺度只能靠「人大概有多大」这个先验，误差约 ±10%\n'
+            '  （整体缩放：全量程偏同一个百分比）。换个人就可能偏这么多。\n\n'
+            '· 每个都量：最传统，每个点都用卷尺量出距离。')
+        self.combo_dist_source.currentIndexChanged.connect(
+            self._sync_solve_button_enabled)
+        self.combo_dist_source.currentIndexChanged.connect(
+            self._update_mount_status)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel('距离来源：', self))
+        row.addWidget(self.combo_dist_source)
+        row.addStretch(1)
+        # 插到「已记录采样点…」状态行之前
+        self.verticalLayout_mount.insertLayout(
+            self.verticalLayout_mount.count() - 1, row)
+
+        # 把「要量的是哪一段距离」写死在界面上。
+        # 原 .ui 只写了「已知距离（m）」五个字，而这里恰恰是最容易量错的地方：
+        # 量成斜距（卷尺拉到镜头）或量到镜头中心都不对。镜头离地 0.98 m 时，
+        # 站 4 m 处水平距离 4.00 m、斜距 4.12 m —— 差 12 cm，约 3%，
+        # 且这个误差是**整体缩放**，量一次错就全量程都错。
+        hint = getattr(self, 'label_mount_hint', None)
+        if hint is not None:
+            hint.setWordWrap(True)
+            hint.setText(
+                '① 要量的距离 = 「镜头正下方的地面点」 到人站的位置，'
+                '沿地面量出来的水平距离。\n'
+                '不是斜距，也不是到镜头的直线长度。做法：卷尺平铺在地上，'
+                '起点对准镜头在地面的投影点（从镜头垂一根线到地面即可找到）。\n'
+                '② **相机装多高不用量，也不用填** —— 测距要的是「相机到框底边'
+                '对应位置的垂直落差」，它连同俯仰角一起由采样点解出来。\n'
+                '③ 第 1 个点量完并「记为采样点」后，「已知距离」会自动置灰 —— '
+                '后面几个点**不用再量**，但**必须换到明显不同的距离站好**'
+                '（第 1 点在 4 m，第 2 点就站到 5 m 左右：两个点至少要拉开 '
+                '1/4；原地不动或只挪一点点会被当成同一个点、或被求解拒答）。\n'
+                '④ 解出来的「安装高度」若小于卷尺量到的高度（如 0.73 < 0.98），'
+                '说明检测框底边没落在脚上 —— **这是正常的，不要改成卷尺值**。')
+        # 同一件事写在控件上：解出的高度不是卷尺值，用户看到 0.73 会以为解错了
+        spin_h = getattr(self, 'spin_camera_height', None)
+        if spin_h is not None:
+            spin_h.setToolTip(
+                '相机到**框底边对应位置**的垂直落差（米），接触点法按 '
+                'Z = 本值 / tan(俯角) 计算。\n\n'
+                '⚠️ 它**不是**卷尺量到的安装高度：检测框底边不落在脚上时\n'
+                '（本项目实测底边在小腿中部，卷尺 0.98 m 而这里解出 0.73 m），\n'
+                '两者不相等，差的就是框底边离地的那一段。\n\n'
+                '测距用的是这一个值 —— 把它改成卷尺量到的高度会让读数整体偏大。')
+
+    # ------------------------------------------------------------------
+    # ⚠️ 已下线（2026-10-01）：「已知相机高度（卷尺量）」与
+    # 「框底边不在脚上（同时解抬升量）」两行。
+    # 原因见 _build_dist_source_row 的 docstring：填相机高度**不提升**测距精度，
+    # 还把用户带进「公式里的高度 = 卷尺量到的安装高度」这个错误概念 ——
+    # 实测 4 m 单点标定 → 5 m 读 4.72（-5.6%）。
+    # 标定现在只剩自标定一条路：解 (垂直落差, 俯仰角) 两个未知数。
+    # ------------------------------------------------------------------
+
     def bind_calibration_widgets(self):#仅标定时生效
         self.slider_sample_freq.valueChanged.connect(lambda v:self.label_sample_freq.setText(f'{v}Hz'))
         self.slider_base_width.valueChanged.connect(lambda v:self.label_base_width.setText(f'{v}px'))
         self.spin_pitch_deg.valueChanged.connect(self.on_pitch_changed)
         self.spin_camera_height.valueChanged.connect(self.on_camera_height_changed)
+        # ⚠️ 没有 spin_foot_offset 了 —— 抬升量已随「已知相机高度」一起下线，
+        # 见 _build_dist_source_row 的 docstring。
         # 安装参数自标定（标定页 ②，2026-09-29 从监视页搬来）
         self.btn_mark_known.clicked.connect(self.on_mark_known_clicked)
         self.btn_solve_mount.clicked.connect(self.on_solve_mount_clicked)
@@ -876,10 +1023,8 @@ class MainWindow(QWidget, Ui_Form):
         没有标定不是错误 —— 只是测距不可用：这里只记录原因，不阻塞启动，
         UI 会明确显示「本设备未标定」，而不是静默给一个假距离。
         """
-        path = self.global_params.calib_path
-        if not os.path.isabs(path):
-            # 相对仓库根解析，避免工作目录变化导致找不到
-            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
+        # 相对仓库根解析，避免工作目录变化导致找不到（统一走 _resolve_repo_path）
+        path = _resolve_repo_path(self.global_params.calib_path)
         self._calib_file = path
         # 安装参数（外参）与内参**同目录、分开存**：两者生命周期不同（内参跟相机走、
         # 安装参数跟机位走），合并会让「重标内参」把安装参数一起冲掉
@@ -1220,27 +1365,35 @@ class MainWindow(QWidget, Ui_Form):
         data = load_mount_params(path)
         if not data:
             return
+        h0 = float(data['camera_height'])
+        # 向后兼容：旧文件里可能带 foot_offset_m（「框底边抬升量」，随
+        # 「已知相机高度」一起下线）。几何用的是落差 (H − off)，把抬升量
+        # **折进**相机高度、抬升量归零，结果与旧文件完全等价。
+        off0 = float(data.get('foot_offset_m', 0.0) or 0.0)
+        h0_eff = max(0.0, h0 - off0)
         self._loading_mount = True
         try:
-            self.spin_camera_height.setValue(float(data['camera_height']))
+            self.spin_camera_height.setValue(h0_eff)
             self.spin_pitch_deg.setValue(float(data['pitch_deg']))
         finally:
             self._loading_mount = False
         h = float(self.spin_camera_height.value())
         p = float(self.spin_pitch_deg.value())
+        off = 0.0
 
         # 显式生效（不能依赖 valueChanged —— 见上面的 ⚠️）。三步与
         # on_pitch_changed / on_camera_height_changed 保持完全一致，
         # 保证「加载出来的」与「手工填的」走到同一个内部状态。
         self.global_params.camera_height = h
         self.global_params.pitch_deg = p
+        self.global_params.foot_offset_m = off
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
         self.refresh_distance_widgets(self._last_ranging)
 
         src = data.get('source') or '已保存'
         when = data.get('saved_at') or '—'
         self.status_bar.showMessage(
-            f'已加载安装参数：相机高度 {h:.2f} m、俯仰角 {p:.1f}°'
+            f'已加载安装参数：垂直落差 {h:.2f} m、俯仰角 {p:.1f}°'
             f'（{src} @ {when}）', 6000)
         print(f'[安装参数] 加载 {path}  H={h:.2f} m  θ={p:.1f}°  '
               f'source={src} saved_at={when}')
@@ -1261,7 +1414,8 @@ class MainWindow(QWidget, Ui_Form):
             return
         try:
             save_mount_params(path, self.spin_camera_height.value(),
-                              self.spin_pitch_deg.value(), source=source)
+                              self.spin_pitch_deg.value(), source=source,
+                              foot_offset_m=0.0)
         except OSError as e:
             self.status_bar.showMessage(f'安装参数保存失败：{e}（本次仍已生效）', 8000)
 
@@ -1621,8 +1775,13 @@ class MainWindow(QWidget, Ui_Form):
         self._mark_samples = []
         self._mark_distance = float(self.spin_known_dist.value())
         self.btn_mark_known.setEnabled(False)
-        self.label_mount_status.setText(
-            f'正在采样 {self._mark_distance:.2f} m 处的目标……请让目标静止')
+        if self._dist_mode() == self.DIST_MODE_NONE:
+            self.label_mount_status.setText(
+                '正在采样（全自动档：不用量距离）……请让目标静止，'
+                '再换一个距离采下一个点')
+        else:
+            self.label_mount_status.setText(
+                f'正在采样 {self._mark_distance:.2f} m 处的目标……请让目标静止')
         if self._mark_timer is not None:
             self._mark_timer.stop()
         self._mark_timer = QTimer(self)
@@ -1645,7 +1804,11 @@ class MainWindow(QWidget, Ui_Form):
                 f'{len(samples)} 帧（至少需要 {self.MARK_MIN_FRAMES} 帧）。'
                 f'请让目标完整出现在画面里再重试。')
             return
-        arr = np.asarray(samples, dtype=float)
+        # 兼容两种元素形态（dict = 现在；float = 只记底边的旧格式）
+        def _field(key, alt):
+            return [s[key] if isinstance(s, dict) else alt(s) for s in samples]
+
+        arr = np.asarray(_field('bottom', lambda s: float(s)), dtype=float)
         spread = float(arr.std())
         if spread > self.MARK_MAX_SPREAD_PX:
             self.label_mount_status.setText(
@@ -1654,24 +1817,141 @@ class MainWindow(QWidget, Ui_Form):
                 f'请让目标静止后重新采样。')
             return
 
-        # 同一个距离重复标记 -> 覆盖，避免列表里堆互相矛盾的点
-        self._mount_marks = [m for m in self._mount_marks
-                             if abs(m['dist'] - z) > 0.05]
-        self._mount_marks.append({'dist': z, 'v': float(arr.mean()),
-                                  'std': spread, 'n': len(arr)})
-        self._mount_marks.sort(key=lambda m: m['dist'])
-        self.btn_solve_mount.setEnabled(len(self._mount_marks) >= 2)
+        rec = {'dist': z, 'v': float(arr.mean()),
+               'std': spread, 'n': len(arr)}
+        if samples and isinstance(samples[0], dict):
+            tops = np.asarray(_field('top', lambda s: float('nan')), dtype=float)
+            hs = np.asarray(_field('h', lambda s: float('nan')), dtype=float)
+            ws = np.asarray(_field('w', lambda s: float('nan')), dtype=float)
+            rec.update({
+                'top': float(np.nanmean(tops)),
+                'box_h': float(np.nanmean(hs)),
+                'box_w': float(np.nanmean(ws)),
+                'clip_bottom': any(bool(s.get('clip_bottom')) for s in samples),
+                'clip_top': any(bool(s.get('clip_top')) for s in samples),
+            })
+        # 这一点的距离要不要用户量 —— 由「距离来源」决定：
+        #   全自动档一个都不用；「只量第 1 个」档只在还没有已知点时才问。
+        # 没量距离的点的距离后面由 distances_from_box_height 从框高推出来。
+        mode = int(self.combo_dist_source.currentIndex())
+        n_known = sum(1 for m in self._mount_marks
+                      if m.get('dist') is not None)
+        if mode == self.DIST_MODE_NONE or (
+                mode == self.DIST_MODE_ONE_MEASURED and n_known >= 1):
+            rec['dist'] = None
+        else:
+            rec['dist'] = float(z)
+
+        # 同一位置重复标记 -> 覆盖。没量距离的点只能靠框高判重（框高 ∝ 1/距离）。
+        new_h = rec.get('box_h') or 0.0
+        if rec['dist'] is None:
+            self._mount_marks = [
+                m for m in self._mount_marks
+                if m.get('dist') is not None
+                or abs((m.get('box_h') or 0.0) - new_h) > 0.03 * max(new_h, 1.0)]
+        else:
+            self._mount_marks = [
+                m for m in self._mount_marks
+                if m.get('dist') is None or abs(m['dist'] - z) > 0.05]
+        self._mount_marks.append(rec)
+        # 按框高降序 = 按距离升序。这样「没量距离的点」也能排进正确次序
+        # （dist 可能是 None，不能拿来排序）。
+        self._mount_marks.sort(key=lambda m: -float(m.get('box_h') or 0.0))
+        self._sync_solve_button_enabled()
         self._update_mount_status()
+
+    def _dist_mode(self) -> int:
+        """「距离来源」下拉的当前档位。控件还没建好时按「每个都量」处理（旧行为）。"""
+        combo = getattr(self, 'combo_dist_source', None)
+        if combo is None:
+            return self.DIST_MODE_ALL_MEASURED
+        return int(combo.currentIndex())
+
+    def _sync_dist_input_enabled(self):
+        """「已知距离」输入框这一轮要不要填 —— 由「距离来源」与已有采样点决定。
+
+        全自动档永远不用填；「只量第 1 个」档在已经有已知点之后也不用再填，
+        这样用户换位置时不用再去找卷尺。
+        """
+        spin = getattr(self, 'spin_known_dist', None)
+        if spin is None:
+            return
+        mode = self._dist_mode()
+        if mode == self.DIST_MODE_NONE:
+            spin.setEnabled(False)
+        elif mode == self.DIST_MODE_ONE_MEASURED:
+            n_known = sum(1 for m in self._mount_marks
+                          if m.get('dist') is not None)
+            spin.setEnabled(n_known == 0)
+        else:
+            spin.setEnabled(True)
+
+    def _sync_solve_button_enabled(self):
+        """「求解」按钮的可用条件 —— 只取决于「距离来源」这一个下拉。
+
+        要解 (垂直落差, 俯仰角) 两个未知数，就需要**两个不同距离**的采样点；
+        但这两点的距离不一定要用户量 —— 见 ``_build_dist_source_row``：
+
+            每个距离都量   -> 至少 2 个**已知**距离
+            只量第 1 个    -> 至少 1 个已知距离 + 总共 2 个点
+            一个都不量     -> 总共 2 个点即可（距离全靠框高先验推）
+        """
+        n_total = len(self._mount_marks)
+        n_known = sum(1 for m in self._mount_marks if m.get('dist') is not None)
+        mode = self._dist_mode()
+        if mode == self.DIST_MODE_ALL_MEASURED:
+            ok = n_known >= 2
+        elif mode == self.DIST_MODE_ONE_MEASURED:
+            ok = n_known >= 1 and n_total >= 2
+        else:
+            ok = n_total >= 2
+        self.btn_solve_mount.setEnabled(ok)
 
     def _update_mount_status(self):
         """把已记录的采样点回显到「标定」页 ② 组的粗体状态行（含还差几个、能不能求解）。"""
         marks = self._mount_marks
-        text = '已记录采样点：' + '、'.join(
-            f"距离 {m['dist']:.2f} m → 底边 {m['v']:.0f} px"
-            f"（{m['n']} 帧，散布 {m['std']:.1f} px）" for m in marks)
-        if len(marks) < 2:
-            text += (f'\n还差 {2 - len(marks)} 个：换一个距离'
-                     f'（推荐 5 m、10 m）再点一次「记为采样点」')
+        self._sync_dist_input_enabled()
+
+        def one(m):
+            d = m.get('dist')
+            head = f"距离 {d:.2f} m" if d else "距离 自动推"
+            s = (f"{head} → 底边 {m['v']:.0f} px"
+                 f"（{m['n']} 帧，散布 {m['std']:.1f} px）")
+            # 框高是「框底边到底是不是脚」的唯一自查依据，必须上屏
+            if m.get('box_h'):
+                s += f"、框高 {m['box_h']:.0f} px"
+            if m.get('clip_bottom'):
+                s += ' ⚠️贴底'
+            if m.get('clip_top'):
+                s += ' ⚠️贴顶'
+            return s
+
+        text = '已记录采样点：' + '、'.join(one(m) for m in marks)
+        # 「距离来源」回显：让用户清楚这一轮要不要拿尺子、代价是多少
+        _mode = self._dist_mode()
+        _n_known = sum(1 for m in marks if m.get('dist') is not None)
+        if _mode == self.DIST_MODE_ALL_MEASURED:
+            text += '\n距离来源：每个点都用卷尺量（约 ±1%）'
+        elif _mode == self.DIST_MODE_ONE_MEASURED:
+            text += ('\n距离来源：只量第 1 个，其余按框高比自动推（约 ±1%）'
+                     + ('—— 已知距离已够：**换到明显不同的距离**站好直接点，'
+                        '不用再量（原地不动会被当成同一个点）'
+                        if _n_known else '—— 下一个点请用卷尺量出距离'))
+        else:
+            text += (f'\n距离来源：全自动，一个都不用量（约 ±'
+                     f'{BODY_SPAN_PRIOR_REL_SIGMA * 100:.0f}%，是整体缩放；'
+                     f'量一个距离即可降到 ±1%）')
+        if any(m.get('clip_bottom') for m in marks):
+            text += ('\n⚠️ 有点贴到画面底缘了 —— 那种点「框底边」不是脚，'
+                     '喂进解算会解出假答案。请换个更远的距离重采该点。')
+        elif len(marks) < 2:
+            _kd = [m['dist'] for m in marks if m.get('dist')]
+            _tip = ('' if not _kd
+                    else f'：已采 {max(_kd):.2f} m，下一个点请站到 '
+                         f'{max(_kd) * 1.25:.2f} m 左右 —— **明显更远**，'
+                         f'别只挪一点点，也别更近（近了会贴到画面底缘）')
+            text += (f'\n还差 {2 - len(marks)} 个：换一个**明显不同**的距离'
+                     f'{_tip}，站定后点「记为采样点」')
         elif len(marks) == 2:
             text += ('\n可以点「求解安装参数」。注意两点**无法自查**标记错误'
                      '（如把膝盖当成脚），建议再补一个距离做三点')
@@ -1681,14 +1961,59 @@ class MainWindow(QWidget, Ui_Form):
 
     @Slot()
     def on_solve_mount_clicked(self):
-        """由采样点反解 (相机安装高度, 俯仰角)，并写回标定页立即生效。"""
+        """由采样点反解 (垂直落差, 俯仰角)，并写回标定页立即生效。
+
+        「垂直落差」= 相机到**框底边对应位置**的垂直距离。框底边不在脚上时
+        它小于卷尺量到的安装高度（本项目实测 0.73 vs 卷尺 0.98）—— 这是
+        测距公式真正需要的那个量，别拿卷尺值去覆盖它。
+        """
         intr = self.global_params.intrinsics
         if intr is None or not intr.is_valid():
             QMessageBox.warning(self, '安装参数自标定',
                                 '相机未标定（没有可用内参），无法解算安装参数。')
             return
-        marks = [(m['dist'], m['v']) for m in self._mount_marks]
-        sol = solve_mount_params(marks, intr)
+        # ---- 采样点的距离从哪来 ----------------------------------------
+        # 「每个都量」档：直接用用户填的距离。
+        # 「只量第 1 个」档：其余点的距离按**框高比**推（精度与量的几乎相同）。
+        # 「全自动」档：全部靠人体尺寸先验推（误差约 ±10%，整体缩放）。
+        mode = self._dist_mode()
+        scale_rel_sigma = 0.0
+        if mode == self.DIST_MODE_ALL_MEASURED:
+            marks = [(m['dist'], m['v']) for m in self._mount_marks
+                     if m.get('dist') is not None]
+        elif mode == self.DIST_MODE_ONE_MEASURED:
+            anchors = [m for m in self._mount_marks
+                       if m.get('dist') is not None]
+            if not anchors:
+                QMessageBox.warning(
+                    self, '安装参数自标定',
+                    '「只量第 1 个距离」这一档要求**至少有一个点**是用卷尺量的。\n'
+                    '请站到卷尺量好的位置再采一次，或把「距离来源」改成全自动。')
+                return
+            anchor = anchors[0]
+            marks = []
+            for m in self._mount_marks:
+                if m.get('dist') is not None:
+                    marks.append((float(m['dist']), float(m['v'])))
+                else:
+                    sub, _ = distances_from_box_height([m], intr,
+                                                       anchor=anchor)
+                    marks.extend(sub)
+        else:
+            marks, scale_rel_sigma = distances_from_box_height(
+                self._mount_marks, intr)
+        if len(marks) < 2:
+            self.label_mount_status.setText(
+                f'求解未通过：有效采样点只有 {len(marks)} 个，至少需要 2 个')
+            QMessageBox.warning(
+                self, '安装参数自标定',
+                f'有效采样点只有 {len(marks)} 个（至少需要 2 个不同距离的采样点）。\n'
+                '请换一个距离再点一次「记为采样点」。')
+            return
+        # 距离由框高推出来的两档，采样点只能在「不贴画面底缘」的窄区间里取，
+        # 达不到默认的 1.5 倍跨度门槛 —— 见 MOUNT_MIN_DIST_SPAN 的注释。
+        span_gate = None if mode == self.DIST_MODE_ALL_MEASURED else 1.2
+        sol = solve_mount_params(marks, intr, min_dist_span=span_gate)
         if not sol.ok:
             self.label_mount_status.setText(f'求解未通过：{sol.reason}')
             QMessageBox.warning(
@@ -1705,26 +2030,43 @@ class MainWindow(QWidget, Ui_Form):
         pitch_applied = float(self.spin_pitch_deg.value())
         self.global_params.camera_height = h_applied
         self.global_params.pitch_deg = pitch_applied
+        self.global_params.foot_offset_m = 0.0
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
         self.refresh_distance_widgets(self._last_ranging)
         # 落盘。上面两个 setValue 已经各自触发过一次落盘（来源会被记成「手工填写」），
         # 这里再用正确来源覆盖写一次 —— 文件很小，一次多余写入换来源标注准确，划算。
         self._persist_mount_params('自标定')
 
-        sens = (0.01745 * 10.0 / h_applied * sol.sigma_pitch * 100.0
-                if h_applied > 0 else float('nan'))
+        h_eff = h_applied
+        sens = (0.01745 * 10.0 / h_eff * sol.sigma_pitch * 100.0
+                if h_eff > 0 else float('nan'))
         self.label_mount_status.setText(
-            f'已解出：安装高度 {h_applied:.2f} m、俯仰角 {pitch_applied:.1f}°'
+            f'已解出：垂直落差 {h_applied:.2f} m、俯仰角 {pitch_applied:.1f}°'
             f'（残差 {sol.residual_px:.2f} px，用了 {sol.n_points} 个采样点）')
+        # 全自动档：必须把「误差从哪来、有多大、怎么消掉」说清楚 ——
+        # 用户没拿尺子，就得知道自己拿到的是什么精度的数。
+        if scale_rel_sigma > 0:
+            scale_line = (
+                f'\n⚠️ 本轮**没有用尺子**：距离尺度来自人体尺寸先验'
+                f'（框覆盖的真实长度按 {BODY_SPAN_PRIOR_M:.2f} m 估算）。\n'
+                f'    测距误差约 ±{scale_rel_sigma * 100:.0f}%'
+                f'（95% 分位约 ±{scale_rel_sigma * 200:.0f}%），'
+                f'而且是**整体缩放** —— 全量程偏同一个百分比。\n'
+                f'    这个误差来自「人有多高多宽」的个体差异，不是算法能修的；\n'
+                f'    量一个已知距离重标一次即可降到 ±1% 左右。\n')
+        else:
+            scale_line = ''
         QMessageBox.information(
             self, '安装参数自标定',
             f'{sol.detail}\n\n'
             f'估计精度（按底边定位误差 1 px 估计）：\n'
-            f'    相机高度 ±{sol.sigma_height * 100:.1f} cm\n'
-            f'    俯仰角   ±{sol.sigma_pitch:.2f}°\n\n'
-            f'已写入「标定」页 ② 组的安装参数：安装高度 {h_applied:.2f} m、'
-            f'俯仰角 {pitch_applied:.1f}°，已立即生效。\n'
-            f'按这两个数，10 m 处由俯仰角误差贡献的距离误差约 {sens:.1f}%。')
+            f'    垂直落差 ±{sol.sigma_height * 100:.1f} cm\n'
+            f'    俯仰角   ±{sol.sigma_pitch:.2f}°\n'
+            f'{scale_line}\n'
+            f'已写入「标定」页 ② 组的安装参数：垂直落差 {h_applied:.2f} m、'
+            f'俯仰角 {pitch_applied:.1f}°'
+            + '，已立即生效。\n'
+            + f'按这两个数，10 m 处由俯仰角误差贡献的距离误差约 {sens:.1f}%。')
 
     # ------------------------------------------------------------------
     # 录制回放（CHARTER「范围内的」第 6 条）
@@ -2834,6 +3176,33 @@ class MainWindow(QWidget, Ui_Form):
                     f'（相似度 {score:.3f} < 门槛 {thr:.3f}）')
         return f'{head} —— 已丢弃这个检测框，距离按不可测'
 
+    def _sync_ranging_width(self):
+        """把「宽度法该用谁的肩宽」同步给测距器。
+
+        调用时机：① 每帧检测回调的**最前面**（不看本帧画面，见下）；
+        ② 用户切换/取消追踪目标时（不必等下一帧，标定页也要立刻跟）。
+
+        规则只有一条：**认「指定的追踪目标」**（2026-09-30 用户要求：
+        「有追踪目标的时候用目标的肩宽，没有的时候就不用动」）：
+          · 指定了追踪目标        -> 该目标档案里量出的肩宽（建档的意义就在这）
+          · 未指定 / 目标还没量到 -> 全局默认 0.46 m，**不借用**别人的
+        见 ``PersonFeatureTracker.ranging_width_m()``。
+
+        为什么每帧都算、且不看本帧画面：目标走出画面时若不刷新，
+        ``ranger.config`` 会**停在上一个目标的值上** —— 此后取消追踪目标、
+        或到标定页看距离，用的还是那个人的肩宽，而且不报错。
+
+        为什么**不写回** ``global_params.person_width_m``：那是「用户默认值」
+        （``RangingConfig.from_params()`` 从它取值），一旦被写成某个档案的
+        肩宽就再也回不去 —— 换目标时会拿**上一个人的**肩宽当默认值，正是
+        要避免的那类静默串人。两处职责分开：
+
+          · ``self.ranger.config.person_width_m``  = 本帧实际生效值（每帧刷新）
+          · ``self.global_params.person_width_m``  = 用户默认值（只由设置页写）
+        """
+        self.ranger.config.person_width_m = self._person_tracker.ranging_width_m(
+            self.global_params.person_width_m)
+
     def refresh_track_target_combo(self):
         """用指纹档案列表重填「追踪目标选择」下拉。
 
@@ -2843,6 +3212,10 @@ class MainWindow(QWidget, Ui_Form):
         当前选中项从档案里的 ``is_track_target`` 反读（文件才是唯一真相），
         并在末尾把 ``global_params.track_target_id`` 同步成它。
         """
+        # 重填之前先同步一次肩宽：本函数会因为「档案被删 / 从文件反读到别的
+        # 目标」而改变「追谁」，而它下面有早退分支（无档案时 return），
+        # 放在开头才能覆盖所有路径。见 _sync_ranging_width。
+        self._sync_ranging_width()
         combo = self.combo_track_target
         combo.blockSignals(True)
         try:
@@ -2897,9 +3270,12 @@ class MainWindow(QWidget, Ui_Form):
         if not pid:
             self._person_tracker.set_track_target('')
             self.global_params.track_target_id = ''
+            self._sync_ranging_width()      # 立刻回默认肩宽，不等下一帧
             self.refresh_target_category_label()
             self._dist_legend_refresh()     # 取消指定 -> 图例退回类别名「人」
-            self.status_bar.showMessage('已取消追踪目标：仅跟随本帧匹配到的人', 5000)
+            self.status_bar.showMessage(
+                '已取消追踪目标：不再做身份拦截，近场宽度法改用默认肩宽 0.46 m',
+                6000)
             return
         hit = self._person_tracker.set_track_target(pid)
         if hit is None:
@@ -2908,6 +3284,7 @@ class MainWindow(QWidget, Ui_Form):
             self.refresh_track_target_combo()
             return
         self.global_params.track_target_id = pid
+        self._sync_ranging_width()          # 换目标立刻换肩宽，不等下一帧（防串人）
         # 立刻反映到监视页 —— 不让用户以为「选了没生效、得等下一帧」
         self.refresh_target_category_label()
         self._dist_legend_refresh()     # 距离曲线图例：那条线现在叫他的名字
@@ -3113,6 +3490,9 @@ class MainWindow(QWidget, Ui_Form):
         # 「非追踪目标」，或者反过来 —— 残留结论比不显示更容易骗人。
         self._identity_reject_note = None
 
+        # 宽度法用谁的肩宽：每帧先定一次（不看本帧画面，理由见 _sync_ranging_width）
+        self._sync_ranging_width()
+
         if target and target['confidence']>=self.global_params.confidence_thres:# 增加置信度过滤，低于阈值视为无目标
             self.last_detection = target   # 过滤后的目标才进画面叠加（2026-09-26：
                                             # 之前无条件记录，低于阈值的椅子误检照样画框，
@@ -3271,30 +3651,32 @@ class MainWindow(QWidget, Ui_Form):
             if (self._person_tracker.enrolling and capture_ok) or has_emb_profile:
                 emb = self._embed_for_enroll(frame_bgr, target)
 
-            prev_width = self._person_tracker.ranging_width_m(
-                self.global_params.person_width_m)
             self._person_tracker.observe(
                 target, frame_bgr, now_mono,
                 capture_ok=capture_ok, distance_m=distance_used,
                 fx=self.ranger.intrinsics.fx, fy=self.ranger.intrinsics.fy,
                 embedding=emb, capture_note=capture_note)
-            # 档案匹配/更新后，宽度法换用该用的肩宽（变了才动，避免抖动）。
-            # 指定了追踪目标时用的是**该目标档案里的**肩宽（ranging_width_m）；
-            # 未指定时才是「本帧匹配到的那个人」的 —— 见该方法 docstring。
-            new_width = self._person_tracker.ranging_width_m(
-                self.global_params.person_width_m)
-            if abs(new_width - prev_width) > 1e-6:
-                self.global_params.person_width_m = new_width
-                self.ranger.config.person_width_m = new_width
+            # 肩宽的取用已在**本回调开头**统一做过（每帧一次，不看画面）。
+            # 这里不再重复赋值 —— 放在 observe() 之后有一个额外的坑：参数
+            # 指定的追踪目标走出画面时本分支根本不进，配置就会残留他的值。
+
             # 换人提示（只在新面孔出现时说一次，不刷屏）。措辞保持中性 ——
             # 这里既可能是刚建档的人，也可能是匹配上的旧档案。
+            #
+            # ⚠️「近场宽度法改用该肩宽」这句**只在 p 就是追踪目标时成立**：
+            # 宽度法现在只认追踪目标的肩宽（ranging_width_m）。画面里匹配到
+            # 的若是别人，测距用的仍是默认 0.46 m —— 提示必须跟实际一致，
+            # 否则又是一处「界面说改了、其实没改」，与刚才修掉的那个同类。
             p = self._person_tracker.active
             key = p.profile_id if p is not None else ''
             if key and key != self._last_profile_key:
                 self._last_profile_key = key
+                tail = ('—— 近场宽度法改用该肩宽'
+                        if self._person_tracker.track_target() is p
+                        else '—— 宽度法仍用默认 0.46 m（未把他指定为追踪目标）')
                 self.status_bar.showMessage(
                     f'人员特征：{p.name}（身高 {p.height_m:.2f} m、肩宽 '
-                    f'{p.width_m:.2f} m）—— 近场宽度法改用该肩宽', 6000)
+                    f'{p.width_m:.2f} m）{tail}', 6000)
                 # 新档案进了库 -> 设置页「追踪目标选择」下拉要跟着长出来，
                 # 否则用户得等下次「应用参数」才看得见它（死列表问题）。
                 self.refresh_track_target_combo()
@@ -3388,11 +3770,24 @@ class MainWindow(QWidget, Ui_Form):
         # 安装参数自标定：采样窗口内收集「框底边像素」（只收真的检测到目标的帧）。
         # 底边像素是自标定的观测量，它的随机误差直接进解算 —— 所以取一段窗口
         # 的平均值，并在收尾时用散布判断目标是否静止。
+        # ⚠️ 2026-09-30：除了底边，还要留**框高**。只记底边的话，一旦结果可疑
+        # 就无从判断「框底边到底是不是脚」—— 而那正是自标定唯一的观测前提。
+        # 有了框高就能离线用「身高 1.79 / 框高」反推距离做独立校验。
         if self._marking and isinstance(target, dict) \
                 and self.global_params.detection_height > 0:
-            self._mark_samples.append(
-                float(target.get('y', 0.0))
-                + float(self.global_params.detection_height) / 2.0)
+            _h = float(self.global_params.detection_height)
+            _yc = float(target.get('y', 0.0))
+            self._mark_samples.append({
+                'bottom': _yc + _h / 2.0,
+                'top': _yc - _h / 2.0,
+                'h': _h,
+                'w': float(self.global_params.detection_width),
+                # 贴边 = 脚/头可能已被画面截断，这种点的「底边」不是地面点
+                'clip_bottom': _yc + _h / 2.0 >= (
+                    self.global_params.intrinsics.image_size[1] - 2.0)
+                if self.global_params.intrinsics is not None else False,
+                'clip_top': _yc - _h / 2.0 <= 2.0,
+            })
 
         if self.global_params.plot_enable:
             # 不可测的帧记 **NaN**：历史里保住「没有读数」的语义，不伪装成 0。

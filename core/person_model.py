@@ -586,7 +586,14 @@ class PersonFeatureTracker:
                 f'—— 走近一些再站定')
             return
         h_m = distance_m * h_px / fy      # pinhole 反解（同 estimate_target_height）
-        w_m = distance_m * w_px / fy      # 肩宽同理（见模块 docstring 的精度声明）
+        # ⚠️ 宽度是**横向**尺寸，投影要用 fx，不是 fy（2026-09-30 修）。
+        # 针孔模型：x_img = cx + fx·X/Z、y_img = cy ± fy·Y/Z —— 横纵各用各的
+        # 焦距，而近场宽度法测距用的是 fx（GeometricRanger._distance_from_width）。
+        # 原先这里跟高度共用 fy，两边口径不一致：拿这样算出的档案值去测距，会
+        # 系统性偏小 fx/fy = 1.4%（方向：以为远、实际近）。数值不大，但方向不
+        # 安全，且属于「同一件事两处各写一套」那类该顺手清掉的不一致。
+        # 已落盘的旧档案按旧口径（差异 1.4%），不追溯重算。
+        w_m = distance_m * w_px / fx
         if not (PLAUSIBLE_HEIGHT_M[0] <= h_m <= PLAUSIBLE_HEIGHT_M[1]):
             self._note_block(
                 'implausible_h',
@@ -946,7 +953,13 @@ class PersonFeatureTracker:
     # -- 查询 --------------------------------------------------------------
 
     def current_width_m(self, default: float) -> float:
-        """宽度法该用的肩宽：当前匹配到的人的档案值，否则默认值。"""
+        """「本帧匹配到的那个人」的档案肩宽，没有则 ``default``。
+
+        ⚠️ **不参与测距**（2026-09-30 起）。测距取谁的肩宽只走
+        ``ranging_width_m()`` —— 那里只认「指定的追踪目标」。
+        本方法保留给 UI/诊断回答「本帧匹配上了谁、他肩宽多少」，
+        不要再把它接回测距链路：那会让近场读数随画面里恰好匹配上的人漂移。
+        """
         if self.active is not None and self.active.width_m > 0:
             return float(self.active.width_m)
         return default
@@ -958,8 +971,19 @@ class PersonFeatureTracker:
         用「这个人自己的肩宽」去测，而不是猜 0.46 m、也不是用画面里恰好
         匹配上的别人 —— 后者会让近场读数随路人漂移。
 
-        未指定追踪目标 -> 沿用旧行为（本帧外观匹配到的那个人的肩宽，
-        否则 ``default``），保证「没选目标」时行为与改造前完全一致。
+        未指定追踪目标 -> 用 ``default``（全局默认 0.46 m）。
+        目标档案还没量到肩宽（``width_m <= 0``）-> **同样用 ``default``**，
+        绝不借用画面里别人的档案值。
+
+        ⚠️ 2026-09-30 语义收紧（用户要求：「有追踪目标的时候用目标的肩宽，
+        没有的时候就不用动」）：
+        · 旧实现后两种情形回落到 ``current_width_m()``，即「本帧外观匹配到
+          的那个人」的档案值 —— 等于「画面里有人跟档案对得上就用他的肩宽」，
+          不管他是不是你要追的那个人。没指定目标时画面里是谁本来就不确定，
+          拿一个来路不明的人的肩宽去测距，会把「换人了」变成「距离漂了」，
+          而且不报错，属于最难查的那类不一致；换目标时更会串成上一个人的。
+        · 现在**只认「指定的追踪目标」这一条来源**，其余一律用默认值。
+          代价是「没指定目标时不享受档案精度」，换来的是确定性。
 
         ⚠️ 职责边界：本函数只管**取谁的肩宽**。当前帧里的目标是不是追踪
         目标本人、该不该出数，属**匹配分级**（CHARTER「范围内的」第 4 条）
@@ -968,7 +992,7 @@ class PersonFeatureTracker:
         target = self.track_target()
         if target is not None and target.width_m > 0:
             return float(target.width_m)
-        return self.current_width_m(default)
+        return float(default)
 
     def current_summary(self) -> str:
         """给状态栏/UI 的一句话总结（有没有量到人、量到了什么）。"""

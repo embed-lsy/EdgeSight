@@ -63,13 +63,25 @@ class GlobalParams:
         self.pitch_deg=0.0                   # 相机俯仰角，向下为正，单位度
         self.camera_height=0.0               # 相机安装高度（米），卷尺量。0=未测量，
                                              # 此时地面接触点法不可用（CHARTER 第 2 条）
+        # 框底边抬升量（米）：检测框底边并不落在脚上时（2026-10-01 实测，底边在
+        # 离地 0.249 m 的小腿中部），接触点法按 Z=(H−h_off)/tan(α) 修正。
+        # 0 = 「框底边 == 脚」的旧行为。由「已知相机高度 + 解抬升量」标定得出。
+        self.foot_offset_m=0.0
         self.height_tolerance=0.35           # 反解身高判据的容差：落在 ±35% 内视为合理
         self.object_heights=dict(_OBJECT_HEIGHTS_DEFAULT)
         self.min_pixel_height=8              # 像素高度下限，低于此值不测距
         # 宽度法（近场参考值，2026-09-25 P1+）：脚出画、左右未裁时的兜底测法
-        # Z = fx * 肩宽 / 框宽。肩宽优先取人特征档案（person_profile.json）
-        # 里给当前目标量出的值；没有档案时用这个默认值。
+        # Z = fx * 肩宽 / 框宽。肩宽取自哪里只有两条分支（2026-09-30 收紧，
+        # 见 PersonFeatureTracker.ranging_width_m 与 MainWindow._sync_ranging_width）：
+        #   · 指定了追踪目标 -> 该目标档案（person_profile.json）里量出的肩宽；
+        #   · 未指定 / 目标还没量到 -> **就用下面这个默认值**，不借用画面里
+        #     恰好匹配上的人的档案值（用户要求：「有追踪目标的时候用目标的
+        #     肩宽，没有的时候就不用动」）。
+        # ⚠️ 这是「用户默认值」，运行时**绝不会被改写成某个档案的肩宽** ——
+        # 每帧实际生效值在 ranger.config.person_width_m。两处职责别混：
+        # 混在一起会让「换目标/取消目标」后仍沿用上一个人的肩宽，且不报错。
         self.person_width_m=0.46
+        # 相对仓库根解析（不走当前工作目录），见 main_windows._resolve_repo_path
         self.person_profile_path='models/person_profile.json'
         # OSNet 外观嵌入的匹配阈值（余弦）。⚠️ **占位值，不是校准值**：
         # 取 0.50 的锚点是「同一人跨会话实测中位 0.502」（probe_osnet_reid.py）；
