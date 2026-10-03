@@ -73,6 +73,92 @@ class CameraIntrinsics:
             and self.image_size[1] > 0
         )
 
+    def has_distortion(self) -> bool:
+        """是否带着**非平凡**的畸变系数。
+
+        只有 4 个以上系数、且至少有一个非零才算有 —— 全零（或没存）的档案
+        走这条路径只会白花一次 ``cv2.undistortPoints`` 的开销。
+        """
+        d = self.dist_coeffs or []
+        if len(d) < 4:
+            return False
+        try:
+            vals = [float(v) for v in d[:5]]
+        except (TypeError, ValueError):
+            return False
+        return any(abs(v) > 0.0 for v in vals)
+
+    def undistort_points(self, pts):
+        """把像素点投到**理想针孔像平面**的像素坐标。
+
+        为什么是「理想像平面的**像素**坐标」而不是归一化坐标：这样下游所有
+        按 ``(v - cy) / fy`` / ``fx * W / 框宽`` 写的公式**一行都不用改** ——
+        拿到的还是像素，只是这些像素已经不含畸变了。
+        主点 ``cx/cy`` 与焦距不变（``P=K``），所以两套坐标系可直接混用。
+
+        **失败一律退回原点**（畸变系数缺失、cv2 抛错）—— 去畸变是精度优化，
+        不是正确性问题：算不出来就按没校正的继续走，绝不因此让测距不可用。
+
+        返回与输入等长的 ``[(u, v), ...]``。
+        """
+        src = [(float(p[0]), float(p[1])) for p in pts]
+        if not self.is_valid() or not self.has_distortion():
+            return src
+        k = np.array([[self.fx, 0.0, self.cx],
+                      [0.0, self.fy, self.cy],
+                      [0.0, 0.0, 1.0]], dtype=np.float64)
+        try:
+            d = np.asarray([float(v) for v in (self.dist_coeffs or [])[:5]],
+                           dtype=np.float64).reshape(-1, 1)
+            arr = np.asarray(src, dtype=np.float64).reshape(-1, 1, 2)
+            out = cv2.undistortPoints(arr, k, d, P=k)
+        except (cv2.error, ValueError, TypeError):
+            return src
+        if out is None or len(out) != len(src):
+            return src
+        return [(float(p[0][0]), float(p[0][1])) for p in out]
+
+
+def ideal_box_metrics(box: dict, intrinsics) -> tuple:
+    """检测框在**理想针孔像平面**上的 (框高px, 框宽px, 底边v)。
+
+    取四个边中点（上/下/左/右）分别去畸变后重新量 —— 只用框中心 + 宽高
+    去推是不够的：径向畸变对该点位移的方向取决于它离主点多远，而框的
+    四条边离主点的距离各不相同，整框不是被平移，是被**非均匀拉伸**。
+
+    ⚠️ 实测本机量级（``k1=-0.642, k2=2.50, k3=-4.93``，640x480，
+    ``verify_wrapup.py`` 量得）：
+    画面近角落 (630,470) 位移 **17.2 px**；人脚落在画面底部中心时底边
+    下移 **4.1 px**，接触点法距离 3.295 -> 3.217 m（**-2.3%**）。
+    不是可忽略的小量 —— 但它也不是「改了就一定更准」：见
+    ``RangingConfig.use_distortion``，装上去必须与自标定同口径。
+
+    **无畸变或去畸变失败时原样返回**（``intrinsics`` 为 None 也算），
+    于是既有回归与未标畸变的机器行为完全不变。
+    """
+    h = float(box.get('height', 0.0) or 0.0)
+    w = float(box.get('width', 0.0) or 0.0)
+    cx_b = float(box.get('x', 0.0) or 0.0)
+    cy_b = float(box.get('y', 0.0) or 0.0)
+    top = cy_b - h / 2.0
+    bot = cy_b + h / 2.0
+    left = cx_b - w / 2.0
+    right = cx_b + w / 2.0
+    if intrinsics is None:
+        return h, w, bot
+    try:
+        pts = intrinsics.undistort_points(
+            [(cx_b, top), (cx_b, bot), (left, cy_b), (right, cy_b)])
+    except (TypeError, ValueError, IndexError):
+        return h, w, bot
+    if len(pts) != 4:
+        return h, w, bot
+    t_y = float(pts[0][1])
+    b_y = float(pts[1][1])
+    l_x = float(pts[2][0])
+    r_x = float(pts[3][0])
+    return abs(b_y - t_y), abs(r_x - l_x), b_y
+
 
 # ---------------------------------------------------------------------------
 # 类别名归一化（2026-09-25 22:14 录制实证：标签文件是用户可选的）
@@ -147,13 +233,25 @@ def display_class_name(name) -> str:
 class RangingConfig:
     """几何测距所需的、代码里看不出来的约束。
 
-    ``object_heights`` 是各类别目标的真实高度（米）。这是测距精度的**首要来源**，
-    因为距离与目标真实高度成正比 —— 高度估错 20%，距离就错 20%。
+    ``object_heights`` 是各类别目标「检测框覆盖的真实垂直长度」（米）。
+    这是框跨度法（纵）精度的**首要来源**，因为距离与它成正比 —— 这个值
+    估错 20%，距离就错 20%。
+
+    ⚠️ 语义（2026-10-02 收正，属 B2/B3 阈值收正的一部分）
+    ------------------------------------------------------
+    这里存的**不是身高**，是**框跨度（纵）** —— 与 ``BODY_SPAN_PRIOR_M``
+    同一个口径。原先写 1.70（当身高填的），而本项目检测器实测只框住身体
+    约 1.41 m（底边在小腿、顶边在额头）。于是框跨度法（纵）**恒偏远 20.6%**
+    （1.70/1.41），而两法互检的阈值是 0.30 —— **互检从未真正生效过**：
+    一个恒定 20% 的偏差算出来的差异只有 0.173，永远够不着 0.30。
+    把先验改回 1.41 之后互检才有意义，阈值才收紧得动（见
+    ``MUTUAL_CHECK_RATIO``）。
     """
 
     object_heights: dict = field(default_factory=lambda: {
-        # CHARTER v1.4：唯一类别是「行人」，单位米，取中等偏上个体，偏保守。
-        'person': 1.70,
+        # CHARTER v1.4：唯一类别是「行人」。单位米，**框跨度口径**，
+        # 与 BODY_SPAN_PRIOR_M 同源（实测 1.4177，先验 1.41）。
+        'person': BODY_SPAN_PRIOR_M,
     })
     pitch_deg: float = 0.0         # 相机俯仰角，向下为正，单位度
     camera_height: float = 0.0     # 相机安装高度（米），卷尺量。0 = 未测量，接触点法不可用
@@ -197,6 +295,16 @@ class RangingConfig:
     # 调用方每帧刷新一次，见 MainWindow._sync_ranging_width。
     person_width_m: float = 0.46   # 成年人肩宽默认值（米），参考级精度
     min_pixel_width: int = 40      # 框宽低于此值不启用框跨度法（横）（噪声不可信）
+    # 测距前是否先把关键点投到理想针孔像平面（见 ``ideal_box_metrics``）。
+    #
+    # ⚠️ **默认 False，且不能无条件打开** —— 这是本次最容易踩的一处：
+    # 安装参数（H/俯仰角）是**自标定拟合出来的**，拟合时吃的是**未去畸变**的
+    # 底边像素。若只给测距侧打开去畸变、而 H/θ 还是按旧口径拟合的，两套
+    # 口径混用会**把已吸收掉的偏差再算一遍**（实测 3 m 处约 -3.4%，方向随机位变），
+    # 精度反而变差。
+    # 所以开关由 ``mount.json`` 的 ``geom_version`` 决定：安装参数必须是在
+    # 同一口径下重新自标定过的（version >= 2）才启用。
+    use_distortion: bool = False
 
     def height_for(self, class_name: str) -> Optional[float]:
         """该类别登记的真实高度（米）。**未登记返回 None，不再给兜底值。**
@@ -228,6 +336,9 @@ class RangingConfig:
             min_pixel_height=int(getattr(params, 'min_pixel_height', 8)),
             person_width_m=float(getattr(params, 'person_width_m', 0.46)),
             min_pixel_width=int(getattr(params, 'min_pixel_width', 40)),
+            # 只有当安装参数是在「去畸变口径」下自标定出来的才打开 ——
+            # 理由见字段注释（两套口径混用会让精度变差，不是变好）。
+            use_distortion=bool(getattr(params, 'use_distortion', False)),
         )
 
 
@@ -1115,12 +1226,26 @@ def solve_mount_params(marks, intrinsics,
 # 什么时候定的」。所以除了两个数值，还记来源（自标定 / 手工填写）与时间戳 ——
 # 排查「距离集体偏大」时，第一个要问的就是「H/θ 是什么时候、怎么来的」。
 
-MOUNT_PARAMS_VERSION = 1
+MOUNT_PARAMS_VERSION = 2
+
+# 安装参数的**几何口径版本**（决定测距侧要不要去畸变，见 RangingConfig.use_distortion）
+# ---------------------------------------------------------------------------
+# 1 = 旧口径：自标定拟合时吃的是**原始（含畸变）**的底边像素；
+# 2 = 新口径：采样时先把底边去畸变，H/θ 与测距侧同口径。
+#
+# 为什么必须分版本：H 和俯仰角是**拟合出来的**，拟合吃什么样的像素、测距
+# 就得喂什么样的像素。旧文件（version 1）里的 H/θ 已经把畸变的影响吸收进去了，
+# 此时再打开去畸变等于把同一个偏差算两遍 —— 精度变差而不是变好。
+# 所以：读到 1 就按旧口径跑（行为与升级前完全一致），并在界面上提示重做
+# 自标定；重做之后落盘 version 2，去畸变才自动生效。
+GEOM_VERSION_LEGACY = 1
+GEOM_VERSION_UNDISTORTED = 2
 
 
 def save_mount_params(path: str, camera_height: float, pitch_deg: float,
                       source: str = '', note: str = '',
-                      foot_offset_m: float = 0.0) -> None:
+                      foot_offset_m: float = 0.0,
+                      geom_version: int = GEOM_VERSION_UNDISTORTED) -> None:
     """把安装参数写入 JSON。**任何一次求解成功或手工修改后都应调用**。
 
     只做落盘，不做校验 —— 校验在 ``solve_mount_params`` 里已经做过，
@@ -1136,6 +1261,8 @@ def save_mount_params(path: str, camera_height: float, pitch_deg: float,
         'source': source,
         'saved_at': time.strftime('%Y-%m-%d %H:%M:%S'),
         'note': note,
+        # 几何口径：决定测距侧要不要去畸变。见 GEOM_VERSION_* 的注释。
+        'geom_version': int(geom_version),
     }
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
@@ -1179,7 +1306,66 @@ def load_mount_params(path: str) -> Optional[dict]:
     out['source'] = str(data.get('source', '') or '')
     out['saved_at'] = str(data.get('saved_at', '') or '')
     out['note'] = str(data.get('note', '') or '')
+    # 几何口径版本：**旧文件里没有这个字段** -> 按 1（未去畸变）处理，
+    # 即升级前后行为完全一致，绝不让已标定好的机位悄悄变掉。
+    try:
+        gv = int(data.get('geom_version', GEOM_VERSION_LEGACY) or 0)
+    except (TypeError, ValueError):
+        gv = GEOM_VERSION_LEGACY
+    if gv < GEOM_VERSION_LEGACY:
+        gv = GEOM_VERSION_LEGACY
+    out['geom_version'] = gv
     return out
+
+
+# ---------------------------------------------------------------------------
+# 标定指纹 —— 「这份人员档案是在哪一套标定下量出来的」（B4 档案过期守卫）
+# ---------------------------------------------------------------------------
+#
+# 为什么需要（2026-10-02 实测踩出来的坑）
+# -------------------------------------
+# 档案里的 ``height_m`` / ``width_m`` 不是凭空量的，是**用接触点法反解**出来的：
+# ``h = distance × 框高px / fy``。而 distance 又来自安装参数（H/俯仰角/抬升量）。
+# 所以档案里的尺子**复印的是建档那一刻的标定**。
+#
+# 重标 mount.json 之后，标定变了、档案没变 —— 近场框跨度法（横）继续拿旧尺子
+# 量，实测误差 -7.3%（2 m 读 1.86）。全过程**没有任何提示**：界面照常出数、
+# 数字看起来完全正常。这个守卫就是为了让这件事在数据上**可见**。
+
+def calib_fingerprint(intrinsics=None, camera_height: float = 0.0,
+                      pitch_deg: float = 0.0, foot_offset_m: float = 0.0,
+                      device: str = '') -> str:
+    """把「当前这套标定」压成短指纹。**纯函数**。
+
+    只收真正会改变反解结果的量：设备（换相机）、fx/fy/cy（内参）、
+    相机高度、俯仰角、底边抬升量。**不含** cx（横向没用到）、
+    不含 saved_at（时间变了不代表标定变了）。
+
+    浮点先按固定小数位格式化再哈希 —— 直接哈希 float 会因 1e-15 级
+    噪声每次都算出不同指纹，守卫就变成"永远过期"。
+
+    返回 12 位十六进制短串；``intrinsics`` 为 None 时仍能算出指纹
+    （只是内参那几项退化成 0），保证调用方不必做分支。
+    """
+    import hashlib
+
+    def _r(v, n: int) -> str:
+        try:
+            return f'{float(v):.{n}f}'
+        except (TypeError, ValueError):
+            return 'na'
+
+    fx = fy = cy = 0.0
+    if intrinsics is not None:
+        fx = float(getattr(intrinsics, 'fx', 0.0) or 0.0)
+        fy = float(getattr(intrinsics, 'fy', 0.0) or 0.0)
+        cy = float(getattr(intrinsics, 'cy', 0.0) or 0.0)
+    key = '|'.join([
+        str(device or ''),
+        _r(fx, 2), _r(fy, 2), _r(cy, 2),
+        _r(camera_height, 3), _r(pitch_deg, 2), _r(foot_offset_m, 3),
+    ])
+    return hashlib.sha1(key.encode('utf-8')).hexdigest()[:12]
 
 
 # ---------------------------------------------------------------------------
@@ -1210,7 +1396,26 @@ FOOT_CLIP_TOL_PX = 12.0       # 框底边距画面底边多少像素内视为「
 # `E:\WorkBuddy-Work\scripts\analyze_foot_state_flip.py` 的「改判帧」列。
 FOOT_CLIP_HYST_PX = 12.0      # 已判「脚出画」后，底边须再往回收这么多像素才恢复
 MIN_CONTACT_ANGLE_DEG = 1.0   # 接触点法的最小俯角：低于此值地面交点趋近无穷远
-MUTUAL_CHECK_RATIO = 0.30     # 双源互检：两法差异超过此比例即标「存疑」
+# 两法互检：接触点法与框跨度法（纵）的相对差异超过此比例即标「存疑」。
+#
+# ⚠️ 2026-10-02 从 0.30 收到 0.18（B2）。0.30 从来没起过作用，原因不在阈值本身：
+# ``object_heights['person']`` 原先填的是**身高** 1.70，而框跨度法（纵）要的是
+# **框跨度**（实测 1.41）—— 于是该方法恒偏远 20.6%，两法的固有差异算出来
+# 是 0.173，**永远够不着 0.30**，互检形同虚设（4 m 那次差 12% 没报警就是它）。
+# 先验改成 1.41 之后两法同源、都无系统偏差，阈值才收紧得动。
+#
+# ⚠️ 0.15 这个数**必须低于 0.171**，理由见下。
+#
+# 0.171 是什么：旧的先验偏差（1.70/1.41 - 1 ≈ 20.6%）按本判据的归一化口径
+# （除以两法的较大值）算出来正好是 0.171。也就是说 —— **阈值若高于 0.171，
+# 即使把先验改回错的，互检也一声不响**。压到 0.15 以下之后，先验一旦再错，
+# 互检会立刻持续报「存疑」，把错误变成可见现象而不是静默偏差。这是一条
+# 自带的自检：阈值本身成了先验口径的守卫。
+#
+# 下界由个体差异定：``BODY_SPAN_SIGMA_REL`` = 10%，正常人两法差异约
+# 0.091（=0.10/1.10）；取 0.15 ≈ 1.8σ，既不拿正常身材当异常，又留得下
+# 「目标不完整」这类真实异常（实测被挡到膝上那帧差 0.227，会被抓到）。
+MUTUAL_CHECK_RATIO = 0.15
 
 
 @dataclass
@@ -1718,6 +1923,15 @@ class GeometricRanger:
             image_size = self.intrinsics.image_size
         vis = compute_box_visibility(box, image_size)
         bottom_v = float(box.get('y', 0.0)) + h_px / 2.0
+
+        # ---- 去畸变（B1）--------------------------------------------------
+        # 把测距真正用到的三个量换成**理想针孔像平面**上的值。
+        # ⚠️ 可见性体检 ``vis`` 仍用**原始**框，不能跟着换：它判的是
+        # 「框有没有被画面裁掉」，而画面边界属于原始图像坐标系 —— 拿去畸变后的
+        # 坐标去比边界会把「刚好贴边」判成「没贴边」（实测角落位移可达 30 px）。
+        # 开关由 mount 的几何口径版本决定，见 ``RangingConfig.use_distortion``。
+        if self.config.use_distortion:
+            h_px, w_px, bottom_v = ideal_box_metrics(box, self.intrinsics)
 
         # ---- 「脚是否已出画」的**带记忆**判定（2026-09-26 治本）------------
         # 无记忆的硬阈值会让方法在阈值线上逐帧横跳（实测四个会话翻转

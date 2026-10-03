@@ -68,13 +68,26 @@
   改完先把**改动摆出来给用户过目**，用户看过、说了「提交」才提交。
   AI **不主动 commit**、不「边改边提交」、不「先提交再补报告」。
 - 定位变更单独成 commit，message 前缀 `charter:`，并注明改动来源。
-- 改完**手动跑一次结构校验**（只读，不挂 git hook）：
+-   改完**手动跑一次结构校验**（只读，不挂 git hook）：
 
   ```bash
   python "C:\Users\64696\.workbuddy\skills\project-charter\scripts\charter_check.py" --root E:/GitRepos/EdgeSight
   ```
 
   合格线：**FAIL 0 / WARN 0**，且 `CHARTER.md` ≤ 120 行（超了说明它正在被当规格书用）。
+
+  上面那个是**文档结构**检查器（章节、未决项、下位文档）。
+  仓库里另有一个 **`charter_check.py`（2026-10-02 补齐）**，查的是 CHARTER
+  「成功判据」里的**五条门槛**能不能机械判定：
+
+  ```bash
+  python charter_check.py --root E:/GitRepos/EdgeSight            # 无数据只报不算 FAIL
+  python charter_check.py --root E:/GitRepos/EdgeSight --strict   # 无数据也算不过（发版前用）
+  ```
+
+  判据的输入是**卷尺和真人**，脚本拿不到 —— 实测数字记在 **`docs/验收实测.json`**
+  （分点实测记录表，已备好空模板）。**没填就是「无数据」，绝不假装通过。**
+  两个检查器都要跑：前者管「定位文档有没有被当规格书用」，后者管「门槛判据有没有真测过」。
 
 ## ⚠️ 远端是底线（2026-09-22 用户明确要求）
 

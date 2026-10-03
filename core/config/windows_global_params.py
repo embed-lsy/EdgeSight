@@ -13,8 +13,12 @@
 #
 # ⚠️ 已知不适用于本表的情况：人弯腰/坐姿、类别被误识别。这类误差只能靠
 #    双源互检（CHARTER 第 4 条）暴露，无法在表里消除。
+# ⚠️ 单位是**框跨度（纵）**，不是身高（2026-10-02 收正，见 calibration.py
+#    里 RangingConfig.object_heights 的同款说明）：本项目检测器只框住身体
+#    约 1.41 m（底边在小腿、顶边在额头）。原先填 1.70（当身高），使框跨度法
+#    （纵）恒偏远 20.6%，两法互检因此从未生效过。
 _OBJECT_HEIGHTS_DEFAULT = {
-    'person': 1.70,      # 成年人站姿中位偏上
+    'person': 1.41,      # 成年人站姿框跨度中位（BODY_SPAN_PRIOR_M 同口径）
 }
 
 
@@ -70,6 +74,10 @@ class GlobalParams:
         self.height_tolerance=0.35           # 反解身高判据的容差：落在 ±35% 内视为合理
         self.object_heights=dict(_OBJECT_HEIGHTS_DEFAULT)
         self.min_pixel_height=8              # 像素高度下限，低于此值不测距
+        # 测距前是否先去畸变（B1）。**不是用户开关**，由 mount.json 的
+        # geom_version 决定：安装参数必须是在同一口径下重新自标定过的才开。
+        # 理由见 core/calibration.py 里 RangingConfig.use_distortion 的注释。
+        self.use_distortion=False
         # 框跨度法（横）（近场参考值，2026-09-25 P1+）：脚出画、左右未裁时的兜底测法
         # Z = fx * 肩宽 / 框宽。肩宽取自哪里只有两条分支（2026-09-30 收紧，
         # 见 PersonFeatureTracker.ranging_width_m 与 MainWindow._sync_ranging_width）：

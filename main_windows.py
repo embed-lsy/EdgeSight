@@ -14,7 +14,9 @@ from core.calibration import (CameraCalibrator, CameraIntrinsics,
                               load_mount_params, canonical_class_name,
                               display_class_name, FootClipHysteresis,
                               distances_from_box_height, BODY_SPAN_PRIOR_M,
-                              BODY_SPAN_PRIOR_REL_SIGMA)
+                              BODY_SPAN_PRIOR_REL_SIGMA,
+                              calib_fingerprint, ideal_box_metrics,
+                              GEOM_VERSION_LEGACY, GEOM_VERSION_UNDISTORTED)
 from core.person_model import PersonFeatureTracker, SpeedGate
 from core.ttc import TTCEstimator, TTCResult, TTCLevel, classify_ttc
 from core.ranging_filter import DistanceFilter
@@ -1131,6 +1133,9 @@ class MainWindow(QWidget, Ui_Form):
         # 安装参数（外参）与内参**同目录、分开存**：两者生命周期不同（内参跟相机走、
         # 安装参数跟机位走），合并会让「重标内参」把安装参数一起冲掉
         self._mount_file = os.path.join(os.path.dirname(path), 'mount.json')
+        # 安装参数的**几何口径版本**（B1）。旧文件 = 1（自标定拟合吃的是含畸变的
+        # 像素），只有重新自标定过才升到 2（去畸变口径）。决定测距侧要不要去畸变。
+        self._mount_geom_version = GEOM_VERSION_LEGACY
         # 内参档案库：一台相机一条记录（与 calib.json 同目录，便于一起备份）
         self._cam_store_path = cam_profiles.default_store_path(path)
         self._cam_store = cam_profiles.load_store(self._cam_store_path)
@@ -1227,6 +1232,8 @@ class MainWindow(QWidget, Ui_Form):
         # （例如分辨率此时才发现不符）。少了这一步，界面会停留在上一轮的文案上
         # —— 显示「已标定」而实际已拒用，是典型的"看着正常、其实不一致"。
         self.refresh_camera_widgets()
+        # 内参可能换了（换相机 / 重标）-> 顺带查一遍档案有没有因此过期
+        self._sync_calib_fingerprint()
 
         if d.usable:
             self.status_bar.showMessage(
@@ -1489,8 +1496,16 @@ class MainWindow(QWidget, Ui_Form):
         self.global_params.camera_height = h
         self.global_params.pitch_deg = p
         self.global_params.foot_offset_m = off
+        # 去畸变开关跟着**这份文件**的几何口径版本走（B1）：旧文件 -> 关，
+        # 行为与升级前一模一样；重新自标定过（version>=2）才开。
+        self._mount_geom_version = int(
+            data.get('geom_version', GEOM_VERSION_LEGACY) or GEOM_VERSION_LEGACY)
+        self.global_params.use_distortion = (
+            self._mount_geom_version >= GEOM_VERSION_UNDISTORTED)
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
         self.refresh_distance_widgets(self._last_ranging)
+        # 标定可能换了（重标 / 换相机）-> 用新指纹查一遍「哪些档案过期了」
+        self._sync_calib_fingerprint()
 
         src = data.get('source') or '已保存'
         when = data.get('saved_at') or '—'
@@ -1499,6 +1514,49 @@ class MainWindow(QWidget, Ui_Form):
             f'（{src} @ {when}）', 6000)
         print(f'[安装参数] 加载 {path}  H={h:.2f} m  θ={p:.1f}°  '
               f'source={src} saved_at={when}')
+
+    def _current_calib_fingerprint(self) -> str:
+        """「当前这套标定」的指纹（B4 守卫的输入）。**纯读**。
+
+        设备指纹取**用户确认过**的那台（``_chosen_fingerprint``）而不是自动
+        识别结果：换相机这件事只有用户说得准，自动识别读不到时给空串即可
+        —— 指纹里少一项不会误报「过期」，只是换相机那条判据暂时不生效。
+        """
+        return calib_fingerprint(
+            getattr(self.ranger, 'intrinsics', None),
+            float(getattr(self.global_params, 'camera_height', 0.0) or 0.0),
+            float(getattr(self.global_params, 'pitch_deg', 0.0) or 0.0),
+            float(getattr(self.global_params, 'foot_offset_m', 0.0) or 0.0),
+            device=self._chosen_fingerprint())
+
+    def _sync_calib_fingerprint(self, announce: bool = False) -> None:
+        """把当前标定指纹交给档案库，并查出「哪些档案已过期」。
+
+        ``announce=True`` 时把过期提示说进状态栏 —— 只在**标定真的刚变过**
+        时用它（自标定完成 / 重标），启动时用静默版（只在控制台打一行），
+        否则每次开机都弹同一句会变成噪音。
+        """
+        tracker = getattr(self, '_person_tracker', None)
+        if tracker is None:
+            return
+        # ⚠️ 安装参数还没定（camera_height<=0）时不设指纹：那时算出的指纹是
+        # 拿 0 当高度凑出来的，之后一加载真安装参数就会"全都过期"—— 全是假警报。
+        # 宁可这段时间内守卫不生效，也不能让它喊狼来了。
+        if float(getattr(self.global_params, 'camera_height', 0.0) or 0.0) <= 0:
+            return
+        tracker.set_calib_fingerprint(self._current_calib_fingerprint())
+        txt = tracker.stale_profile_names()
+        if not txt:
+            return
+        print(f'[档案过期] {txt}')
+        if announce:
+            bar = getattr(self, 'status_bar', None)
+            if bar is not None:
+                bar.showMessage(txt, 12000)
+        # 列表行会带「⚠过期」标记，得重填一次才能看见
+        refresh = getattr(self, 'refresh_profiles_list', None)
+        if callable(refresh):
+            refresh()
 
     def _persist_mount_params(self, source: str):
         """把当前控件的安装参数落盘。
@@ -1517,7 +1575,8 @@ class MainWindow(QWidget, Ui_Form):
         try:
             save_mount_params(path, self.spin_camera_height.value(),
                               self.spin_pitch_deg.value(), source=source,
-                              foot_offset_m=0.0)
+                              foot_offset_m=0.0,
+                              geom_version=self._mount_geom_version)
         except OSError as e:
             self.status_bar.showMessage(f'安装参数保存失败：{e}（本次仍已生效）', 8000)
 
@@ -1919,7 +1978,26 @@ class MainWindow(QWidget, Ui_Form):
                 f'请让目标静止后重新采样。')
             return
 
-        rec = {'dist': z, 'v': float(arr.mean()),
+        # 去畸变（B1）：自标定的观测量必须与测距侧**同口径**。
+        # 这里**无条件**去（不是看当前的 use_distortion 开关）—— 因为一次自标定
+        # 成功后落盘的就是 version 2（去畸变口径），采样若按旧口径记，装上去的
+        # 就是一套自相矛盾的 H/θ。intrinsics 没有畸变系数时本函数原样返回。
+        # 逐帧去畸变再平均，而不是先平均再去：畸变是非线性的，先平均会引入偏差。
+        v_mean = float(arr.mean())
+        intr = getattr(self.global_params, 'intrinsics', None)
+        if intr is not None and samples and isinstance(samples[0], dict):
+            cxs = _field('cx', lambda s: float('nan'))
+            und = []
+            for c, b in zip(cxs, arr):
+                if not (np.isfinite(float(c)) and np.isfinite(float(b))):
+                    continue
+                und.append(ideal_box_metrics(
+                    {'x': float(c), 'y': float(b),
+                     'height': 0.0, 'width': 0.0}, intr)[2])
+            if und:
+                v_mean = float(np.mean(und))
+
+        rec = {'dist': z, 'v': v_mean,
                'std': spread, 'n': len(arr)}
         if samples and isinstance(samples[0], dict):
             tops = np.asarray(_field('top', lambda s: float('nan')), dtype=float)
@@ -2133,11 +2211,18 @@ class MainWindow(QWidget, Ui_Form):
         self.global_params.camera_height = h_applied
         self.global_params.pitch_deg = pitch_applied
         self.global_params.foot_offset_m = 0.0
+        # 这一轮采样是按**去畸变口径**记的（见 finalize 里的 ideal_box_metrics），
+        # 解出的 H/θ 自然也是这个口径 -> 升到 version 2 并把测距侧一起切过去。
+        # 顺序很重要：必须先升版本再落盘，否则存下来的还是旧口径。
+        self._mount_geom_version = GEOM_VERSION_UNDISTORTED
+        self.global_params.use_distortion = True
         self.ranger.update_config(RangingConfig.from_params(self.global_params))
         self.refresh_distance_widgets(self._last_ranging)
         # 落盘。上面两个 setValue 已经各自触发过一次落盘（来源会被记成「手工填写」），
         # 这里再用正确来源覆盖写一次 —— 文件很小，一次多余写入换来源标注准确，划算。
         self._persist_mount_params('自标定')
+        # 标定变了 -> 查一遍有没有档案因此过期，并说进状态栏
+        self._sync_calib_fingerprint(announce=True)
 
         h_eff = h_applied
         sens = (0.01745 * 10.0 / h_eff * sol.sigma_pitch * 100.0
@@ -3086,8 +3171,14 @@ class MainWindow(QWidget, Ui_Form):
         「这条档案能不能认人」取决于有没有嵌入，不该藏在详情里。"""
         mark = '★' if p.is_track_target else '　'
         emb = '嵌入✓' if p.embedding else '无嵌入'
+        # ⚠过期（B4）：这份档案是在**另一套标定**下量出来的。它还能用，只是
+        # 精度已不是当前标定下的水平 —— 标记出来，由用户决定要不要重建档。
+        stale = ''
+        if (p.calib_fingerprint
+                and p.calib_fingerprint != self._person_tracker.calib_fingerprint):
+            stale = '　⚠过期'
         return (f'{mark} {p.name}　{_span_pair_text(p.height_m, p.width_m)}'
-                f'　{emb}')
+                f'　{emb}{stale}')
 
     def _selected_profile_id(self) -> str:
         lst = self.list_profiles
@@ -3764,11 +3855,20 @@ class MainWindow(QWidget, Ui_Form):
             if (self._person_tracker.enrolling and capture_ok) or has_emb_profile:
                 emb = self._embed_for_enroll(frame_bgr, target)
 
+            # 去畸变后的框跨度（B1）。必须传：建档量出的 height_m/width_m 是
+            # 「距离 × 框px / f」，若框px 用含畸变的、距离用去畸变的，量出来的
+            # 尺子本身就是歪的，而且这个歪会一直留在档案里。
+            # 关着去畸变时传 None —— 与升级前完全一致。
+            _span_px = None
+            if getattr(self.global_params, 'use_distortion', False):
+                _span_px = ideal_box_metrics(target, self.ranger.intrinsics)[:2]
+
             self._person_tracker.observe(
                 target, frame_bgr, now_mono,
                 capture_ok=capture_ok, distance_m=distance_used,
                 fx=self.ranger.intrinsics.fx, fy=self.ranger.intrinsics.fy,
-                embedding=emb, capture_note=capture_note)
+                embedding=emb, capture_note=capture_note,
+                span_px=_span_px)
             # 肩宽的取用已在**本回调开头**统一做过（每帧一次，不看画面）。
             # 这里不再重复赋值 —— 放在 observe() 之后有一个额外的坑：参数
             # 指定的追踪目标走出画面时本分支根本不进，配置就会残留他的值。
@@ -3895,6 +3995,8 @@ class MainWindow(QWidget, Ui_Form):
                 'top': _yc - _h / 2.0,
                 'h': _h,
                 'w': float(self.global_params.detection_width),
+                # 框中心横坐标：去畸变要按「该点离主点多远」算位移，只给纵坐标算不了
+                'cx': float(target.get('x', 0.0)),
                 # 贴边 = 脚/头可能已被画面截断，这种点的「底边」不是地面点
                 'clip_bottom': _yc + _h / 2.0 >= (
                     self.global_params.intrinsics.image_size[1] - 2.0)

@@ -160,12 +160,16 @@ PLAUSIBLE_WIDTH_M = (0.15, 1.00)
 #
 # 后果：**这个区间下限偏严**。1.79 m 的人反解 1.4177 只是勉强过关；
 # 1.50 m 的人框跨度约 1.13 m，会被这道闸拒掉并提示「不在 1.40–2.00 内」。
-# 按框跨度口径重取应是约 **(1.10, 1.60)**（= 身高 1.50~2.00 各减 0.37）。
-# ⚠️ **数值本次不动** —— 放宽阈值是行为变更，要用户拍板，不擅自改。
+# 按框跨度口径重取 = 身高区间各减约 0.37 m：(1.40, 2.00) -> **(1.10, 1.60)**。
 #
-# 保留「宁可拒」的取舍：反解错的跨度同时意味着宽度也错（两者同源、同一个框），
-# 与其静默存一个会毒化近场测距的值，不如明确说「这次没成、为什么」。
-ENROLL_HEIGHT_M = (1.40, 2.00)
+# ✅ 2026-10-02 用户拍板后**已改**（B3 阈值收正）。此前一直记着
+# 「⚠️ 数值本次不动 —— 放宽阈值是行为变更，要用户拍板」，现在授权到位。
+# 换算回身高，新区间放行 ≈[1.47, 1.97] m，与原区间在**身高**口径上几乎一致
+# （原区间实际放行的也是身高 1.48~2.67 的那一小段），但**下限不再误杀**：
+# 1.50 m 的人框跨度约 1.13 m，旧区间会拒（提示「不在 1.40–2.00 内」），
+# 新区间放行。上限同时收紧（旧区间会放过 2.67 m 的"人"，那是框覆盖到了
+# 别的東西，不是人高）。
+ENROLL_HEIGHT_M = (1.10, 1.60)
 ENROLL_WIDTH_M = (0.28, 0.75)
 
 # 反解精度下限：框高越小，「distance × h_px / fy」的相对误差越大
@@ -213,6 +217,14 @@ class PersonProfile:
     enrolled_at: str = ''        # 主动建档时间；'' = 尚未主动登记
     enroll_source: str = 'auto'  # 'manual' 用户建档 / 'auto' 被动自动建档
     emb_model: str = ''          # embedding 出自哪个模型；换模型后旧嵌入不可比
+    # 建档时的**标定指纹**（``core.calibration.calib_fingerprint``）。
+    # 档案里的 height_m/width_m 是拿接触点法的距离反解出来的，那把尺子
+    # **复印的正是建档那一刻的标定**；重标之后标定变了、档案没变，近场
+    # 框跨度法（横）就会一直拿旧尺子量（实测 -7.3%，且全程无提示）。
+    # 存下指纹，才能把「档案已过期」这件事在数据上问出来（B4 守卫）。
+    # 空串 = 老档案（引入前建立的），守卫对它**不报警** —— 无从比对，
+    # 报警等于拿"不知道"当"过期"，会淹没真正有效的提示。
+    calib_fingerprint: str = ''
 
     def similarity(self, hist) -> float:
         """与 **HSV 直方图**（``appearance`` 字段）的相似度，∈ [0, 1]。
@@ -359,6 +371,10 @@ class PersonFeatureTracker:
         self.enroll_height_m = tuple(enroll_height_m)
         self.enroll_width_m = tuple(enroll_width_m)
         self.enroll_min_box_h_px = float(enroll_min_box_h_px)
+        # 当前标定的指纹（B4）。由 ``set_calib_fingerprint`` 在标定加载/重标
+        # 后写入；建档提交时**复印**进档案，之后靠它判断档案是否已过期。
+        # '' = 标定未知，此时建档不记指纹、守卫不报警。
+        self._calib_fp: str = ''
 
         # 路人池（cohort 归一化）。**无论开关是否打开都建对象** —— 它是一个
         # 空 deque，代价可忽略；这样开关可以运行期翻转，不必重建 tracker。
@@ -423,6 +439,8 @@ class PersonFeatureTracker:
                     # v1 老档案没有字段 -> 它们都是追踪时被动建档的
                     enroll_source=str(p.get('enroll_source', 'auto') or 'auto'),
                     emb_model=str(p.get('emb_model', '') or ''),
+                    # 老档案没有标定指纹 -> 空串，过期守卫对它保持沉默
+                    calib_fingerprint=str(p.get('calib_fingerprint', '') or ''),
                 ))
             self.profiles = profiles
             # 唯一性自愈：文件被手改/合并过可能出现多条 is_track_target，
@@ -447,6 +465,47 @@ class PersonFeatureTracker:
         with open(self.json_path, 'w', encoding='utf-8') as f:
             json.dump(payload, f, ensure_ascii=False, indent=1)
         self._dirty = False
+
+    # -- 标定指纹与「档案是否已过期」（B4） ------------------------------
+
+    def set_calib_fingerprint(self, fp: str) -> None:
+        """登记**当前**这套标定的指纹。标定一变（重标/换相机）就该重设。
+
+        与 ``begin_enrollment`` 分开是有意的：建档是一个短会话，而标定指纹
+        跟着程序运行期走 —— 重标之后不用重新建档也能立刻查出「哪些档过期了」。
+        """
+        self._calib_fp = str(fp or '')
+
+    @property
+    def calib_fingerprint(self) -> str:
+        return self._calib_fp
+
+    def stale_profiles(self) -> list:
+        """返回「标定已变、需要重新建档」的档案列表。**纯读**。
+
+        判据：档案**记了**指纹（非空）+ 与当前指纹不同。
+        两个条件缺一不可 —— 老档案没记指纹，无从比对，不报警
+        （拿"不知道"当"过期"会把真正有效的提示淹掉）。
+
+        ⚠️ 只报、不改：过期的档案**照常可用**（它的数还是当时量的真实值），
+        只是精度已不是当前标定下的水平。要不要重建档由用户决定，
+        本方法绝不替他删档或改数。
+        """
+        cur = self._calib_fp
+        if not cur:
+            return []
+        return [p for p in self.profiles
+                if p.calib_fingerprint and p.calib_fingerprint != cur]
+
+    def stale_profile_names(self) -> str:
+        """给界面用的一句话过期提示；没过期返回空串。"""
+        st = self.stale_profiles()
+        if not st:
+            return ''
+        names = '、'.join(p.name for p in st[:3])
+        more = f' 等 {len(st)} 份' if len(st) > 3 else ''
+        return (f'标定已变更：{names}{more}档案是在旧标定下量的，'
+                f'近场测距会有系统偏差，建议重新建档')
 
     # -- 主动建档会话（CHARTER v1.4「建档」） ------------------------------
 
@@ -539,7 +598,7 @@ class PersonFeatureTracker:
     def observe(self, box: dict, frame_rgb, now: float, *,
                 capture_ok: bool, distance_m: Optional[float],
                 fx: float, fy: float, embedding=None,
-                capture_note: str = '') -> None:
+                capture_note: str = '', span_px=None) -> None:
         """每帧调用（有 person 检测时）。
 
         参数
@@ -595,6 +654,17 @@ class PersonFeatureTracker:
 
         h_px = float(box.get('height', 0.0))
         w_px = float(box.get('width', 0.0))
+        # 去畸变后的框跨度（B1）：由调用方给，与本帧距离同一口径。
+        # 为什么不由本模块自己算：这里刻意不 import cv2，保持纯逻辑可离线单测
+        # （见类 docstring）；而调用方本来就有 intrinsics，顺手算一次即可。
+        # 没给（None / 关着去畸变）就用原始框 —— 与升级前完全一致。
+        if span_px:
+            try:
+                sh, sw = float(span_px[0]), float(span_px[1])
+            except (TypeError, ValueError, IndexError):
+                sh, sw = h_px, w_px
+            if sh > 0 and sw > 0:
+                h_px, w_px = sh, sw
         if h_px <= 0 or w_px <= 0:
             self._note_block('bad_box', '检测框尺寸无效')
             return
@@ -747,6 +817,8 @@ class PersonFeatureTracker:
                 p.emb_model = self.emb_tag
             p.n_updates += 1
             p.updated_at = now_str
+            # 复印当前标定指纹：这次是在哪套标定下量的，就记哪套（B4）
+            p.calib_fingerprint = self._calib_fp
         else:
             # 新人：档案满则挤掉更新时间最早的那个（跟随场景最多三五个人）
             if len(self.profiles) >= self.max_profiles:
@@ -767,7 +839,8 @@ class PersonFeatureTracker:
                               source=note,
                               enroll_source='manual',
                               enrolled_at=now_str,
-                              emb_model=self.emb_tag if emb_new is not None else '')
+                              emb_model=self.emb_tag if emb_new is not None else '',
+                              calib_fingerprint=self._calib_fp)
             self.profiles.append(p)
             self.active = p
         self._samples = []
