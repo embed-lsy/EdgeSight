@@ -142,9 +142,10 @@ PYTHONIOENCODING=utf-8 QT_QPA_PLATFORM=offscreen /d/PYTHON/python.exe verify_ran
    报 `could not read log file`。可靠做法：把信息写进 `.git/COMMIT_MSG_TMP.txt`，
    用 `-F .git/COMMIT_MSG_TMP.txt`（相对 CWD=仓库根解析），提交后删除临时文件。
 8. **提交者身份**：本仓库采用 repo-local `user.name = embed-lsy`（2026-09-22 用户要求统一）。
-   这是**本地提交署名**，与远端仓库所在账号无关 —— 远端仓库在 `fdagtfedshe` 账号下
-   （2026-10-04 用户确认），README / 文档里的 clone 地址一律用
-   `github.com/fdagtfedshe/EdgeSight`。改 git config 属于本地操作，不涉及推送。
+   远端仓库也在 `embed-lsy` 账号下，地址一律用 `github.com/embed-lsy/EdgeSight`
+   （2026-10-04 首次推送时 GitHub 返回「repository moved」确认为 embed-lsy；
+   `fdagtfedshe/EdgeSight` 是**迁移前的旧位置**，靠重定向才推得动，勿再使用）。
+   改 git config 属于本地操作，不涉及推送。
 9. **先看后提交（2026-09-23 用户明确要求，凌驾于任何「做完了就顺手提交」的冲动之上）**
    —— 提交前必须先输出一份**可核对的改动清单**，四项缺一不可：
 
