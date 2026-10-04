@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EdgeSight 实景验证操作指引</title>
+<title>EdgeSight 操作指引</title>
 <style>
   :root {
     --ink: #1f2328;
@@ -20,18 +20,18 @@
   body {
     font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
     color: var(--ink); background: var(--bg);
-    max-width: 860px; margin: 0 auto; padding: 32px 40px 80px;
-    line-height: 1.75; font-size: 15px;
+    max-width: 880px; margin: 0 auto; padding: 32px 40px 80px;
+    line-height: 1.8; font-size: 15px;
   }
-  h1 { font-size: 26px; border-bottom: 2px solid var(--line); padding-bottom: 12px; }
-  h2 { font-size: 20px; margin-top: 40px; padding-left: 10px; border-left: 4px solid var(--accent); }
-  h3 { font-size: 16px; margin-top: 24px; }
-  .meta { color: var(--sub); font-size: 13px; }
+  h1 { font-size: 27px; border-bottom: 2px solid var(--line); padding-bottom: 12px; }
+  h2 { font-size: 20px; margin-top: 44px; padding-left: 10px; border-left: 4px solid var(--accent); }
+  h3 { font-size: 16px; margin-top: 26px; }
+  .meta { color: var(--sub); font-size: 13.5px; }
   .box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; margin: 14px 0; }
   .ok-box { border-left: 4px solid var(--ok); }
   .warn-box { border-left: 4px solid var(--warn); }
-  .bad-box { border-left: 4px solid var(--bad); }
-  ol li, ul li { margin: 6px 0; }
+  .step { color: var(--sub); font-weight: normal; font-size: 15px; }
+  ol li, ul li { margin: 7px 0; }
   .kbd {
     background: var(--panel); border: 1px solid var(--line); border-bottom-width: 2px;
     border-radius: 4px; padding: 1px 7px; font-size: 13px; font-family: Consolas, monospace;
@@ -39,661 +39,249 @@
   }
   .file { font-family: Consolas, monospace; background: var(--panel); padding: 1px 6px; border-radius: 4px; font-size: 13.5px; }
   table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
-  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
   th { background: var(--panel); }
-  .num { font-family: Consolas, monospace; }
   .fill { color: var(--accent); font-weight: bold; }
   code { background: var(--panel); padding: 1px 5px; border-radius: 4px; font-size: 13.5px; }
-  @media print { body { padding: 0; font-size: 12px; } h2 { margin-top: 24px; } }
+  figure { margin: 18px 0; }
+  figure img {
+    width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff;
+    display: block;
+  }
+  figcaption { font-size: 12.5px; color: var(--sub); margin-top: 7px; }
+  .lead { font-size: 15.5px; }
+  @media print { body { padding: 0; font-size: 12px; } h2 { margin-top: 26px; } }
 </style>
 </head>
 <body>
 
-<h1>EdgeSight 实景验证操作指引</h1>
-<p class="meta">对应 CHARTER 门槛判据：卷尺三点测距（2m / 5m / 10m）+ 录制回放 · 只需要一张 A4 纸、一把卷尺、一个人</p>
-<div class="box warn-box">
-  <strong>这份文件与仓库里的 <span class="file">EVALUATION.md</span> 是配套的一对</strong>：
-  EVALUATION.md 写“怎么量、合格线多少”，本文写“一步步照着做”。
-  <strong>两份必须同步改</strong>——界面、默认值、操作步骤有变动时一起更新；
-  只改一份，现场就会照着一份过期的指引白跑一趟。
-</div>
-
-<h2>0 · 要准备的东西</h2>
+<h1>EdgeSight 操作指引</h1>
+<p class="meta">照着做一遍，就能从摄像头画面里读出米制距离。全程约 40 分钟：<strong>打印棋盘格 → 标定 → 采样点标定 → 建档 → 看读数 → 录一段</strong>。需要的东西只有三样：打印机 + 一张 A4 纸、一把卷尺、一个人。</p>
 <div class="box">
-  <ul>
-    <li><strong>打印机和一张 A4 纸</strong> —— 打印棋盘图 <span class="file">chessboard_A4_9x6_18mm.png</span>（就在本文件夹里；文件名里的 18mm 是<strong>设计值</strong>，实际填多少要看打印后量出来的）</li>
-    <li><strong>一把卷尺</strong>（量 2 / 5 / 10 米用；没有卷尺，量好了的地砖也可以，告诉我你用什么量的）</li>
-    <li><strong>一个站着不动的人</strong> —— 身高不限，建档时程序会自己量出他的框跨度</li>
-    <li><strong>USB 摄像头接在电脑上</strong>（软件启动会自动打开它）</li>
-  </ul>
+  <strong>这份文件和仓库里的 <span class="file">EVALUATION.md</span> 是配套的</strong>：
+  本文件写「一步步照着做」，EVALUATION 写「怎么量、合格线多少」。
+  <strong>两份一起看</strong> —— 做完了想知道过没过，去 EVALUATION。
 </div>
 
-<h2>1 · 打印棋盘格（约 5 分钟）</h2>
-<ol>
-  <li>打印 <span class="file">chessboard_A4_9x6_18mm.png</span>。打印对话框里缩放必须选 <strong>「实际大小 / 100%」</strong>，<strong>绝不能选「适应页面」</strong>。</li>
-  <li>打印完，用尺子量图上那条<strong>「打印校验尺」</strong>（标着 0 到 100 的线）：
-    <div class="box ok-box">
-      量出来 <strong>正好 100 mm</strong> → 比例正确，方格就是 18 mm，直接进第二步。<br>
-      量出来 <strong>不是 100 mm</strong>（比如 95 mm）→ 记下实测量。实际方格边长 = 18 × 实测量 ÷ 100。<br>
-      例：量到 95 mm → 方格 = 18 × 95 ÷ 100 = <strong>17.1 mm</strong>，这个数待会要填进软件。
-    </div>
-  </li>
-  <li>把纸<strong>贴在硬纸板或纸盒上压平</strong>。纸软了、卷了、有褶皱，标定精度都会掉。</li>
-</ol>
-
-<h2>2 · 相机标定（约 10 分钟，在「标定」页 ① 组）</h2>
-<ol>
-  <li>启动软件（运行仓库里的 <span class="file">main_windows.py</span>），摄像头自动打开，「监视」页有画面。
-    <div class="box ok-box">
-      <strong>模型会自动加载，不用手动选</strong> —— 启动即用 Windows 端实测最佳的
-      yolov8n + coco80 组合，看一眼状态栏确认「AI模型加载并初始化成功」即可。<br>
-      <span class="meta">（想换模型才需要动手：浏览选新模型 → 点「应用参数」，程序会记住你换的这套。）</span>
-      <ol>
-        <li>切到 <strong>「设置」页</strong>，找到 <strong>「模型配置」</strong> 那一组。</li>
-        <li>启动软件后<strong>模型已自动加载</strong>：程序会默认用
-          <span class="file">models/yolov8/yolov8n.onnx</span> +
-          <span class="file">models/labels/coco80.txt</span>（Windows 端实测最佳组合，
-          README 实测 43~47 ms/帧、<strong>21~23 FPS</strong>），路径已显示在
-          「模型配置」的两个框里，<strong>状态栏出现「AI模型加载并初始化成功」即可</strong>。<br>
-          <span class="meta">想换模型：点「浏览」选新的 → 点
-          <span class="kbd">应用参数</span>（<strong>浏览只改路径，点应用才加载</strong>，
-          加载在后台，界面不卡）。程序会记住你上次用的组合，
-          <strong>下次启动直接加载</strong>，不用重选。
-          可选的有 <span class="file">models/yolov5/</span> 与
-          <span class="file">models/yolov8/</span> 下的 ONNX
-          （按路径里的 <code>yolov5</code> / <code>yolov8</code> 字样决定后处理）；
-          别选 <span class="file">.pt</span>（训练权重，程序读不了）、
-          <span class="file">yolov8n_int8.onnx</span>（实测比 fp32 还慢）。
-          想要中文类别名就换标签 <span class="file">coco_labels_cn.txt</span>
-          （两种标签文件都能认出行人：<code>person</code> 与「人」）。</span></li>
-      </ol>
-      <strong>怎么判断加载好了</strong>：人站到画面里，「监视」页能看到框，框上写着类别名（如 person）。
-      <strong>一个框都没有，先看状态栏有没有「AI模型加载并初始化成功」</strong> ——
-      这跟测距没关系，先去把框弄出来。
-      <br><span class="note">⚠️ <strong>2026-09-26 起，检测只认「人」这一类</strong>（项目定位 v1.4：
-      全链路唯一类别是行人）—— 车辆、猫、椅子等<strong>不会</strong>再出框，
-      这是<strong>有意为之</strong>，不是检测坏了。<strong>2026-09-27 起设置页不再有
-      「指定类别」下拉</strong>（单类别下它没有可选项），原来的「目标选择规则」也换成了
-      <strong>「追踪目标选择」</strong>（下拉内容是<strong>指纹档案</strong>，见下方「追踪目标」一节）。</span>
-    </div>
-  </li>
-  <li>切到 <strong>「标定」页 ① 组「棋盘标定（内参）」</strong>：
-    <ul>
-      <li>棋盘格内角点：保持 <span class="kbd">9 × 6</span>（默认就是，不用动）</li>
-      <li>方格边长：<span class="kbd">17.1</span>（这是<strong>本机打印机的实测值</strong>，程序默认就是它；
-        换了打印机、换了纸型，或打印时选了「适应页面」，都要按上面校验尺算出的实际值改这一格）</li>
-    </ul>
-  </li>
-  <li>点 <span class="kbd">开始采集</span> 按钮 —— 按钮会变成「停止采集」。
-    <span class="meta">（点一次就开始连续采集，不需要反复点。）</span></li>
-  <li>拿起棋盘格面对摄像头，慢慢变换位置和角度，让棋盘：
-    <ul>
-      <li>出现在画面的<strong>各个角落</strong>（左上、右下都要有）</li>
-      <li>有正对的，也有<strong>左右倾、上下倾</strong>的（大概 15°～40° 就行，不用太斜）</li>
-      <li>全程<strong>完整入画</strong>（9×6 = 54 个角点一个都不能出画面）</li>
-    </ul>
-  </li>
-  <li>盯着「标定状态」旁边那行字：<br>
-    显示 <span class="kbd">已采集 X 帧（当前帧检测到棋盘格 ✓）</span> → 正常，继续换姿势；<br>
-    显示 <span class="kbd">当前帧未检测到棋盘格</span> → 说明这一帧没采上，换个角度或挪近一点。<br>
-    <strong>总数采到 15 帧以上</strong>就可以停（至少 10 帧）。</li>
-  <li>直接点 <span class="kbd">求解并保存</span>（<strong>不用先停止采集</strong>）。
-    <div class="box warn-box">
-      <strong>2026-09-23 修正</strong>：旧版这里写的是"先点『停止采集』再求解"，
-      而旧程序里那个按钮会<strong>把已采的帧整批丢弃</strong>，于是求解时弹
-      "还没有采集到有效帧"、白采一场。程序已修：暂停采集<strong>不再丢帧</strong>。
-      现在两条路都行 —— 直接求解，或先「停止采集」（帧会保留）再求解。
-    </div>
-  </li>
-  <li>弹窗出来后<strong>把弹窗里的数字记下来</strong>：
-    <div class="box ok-box">
-      要记：<strong>fx、fy、重投影误差</strong> 这三个数。<br>
-      质量判断：重投影误差 <strong>&lt;0.5 优</strong>｜<strong>&lt;1.0 可接受</strong>｜≥1.0 建议重新采集再算一次。
-    </div>
-  </li>
-</ol>
-
-<div class="box">
-  <strong>标定结果是"按相机记住"的（2026-09-24 起）</strong>：程序能认出这台摄像头（像蓝牙配对那样记住设备），
-  标定一次以后插回来直接可用；<strong>换了别的相机不会拿错内参</strong>，会明确提醒重新标定。<br><br>
-  所以「标定」页 <strong>① 组「棋盘标定（内参）」</strong>顶部多了一栏 <strong>「本机摄像头」</strong>，看它就知道当前这台相机的标定状态：
-  <table>
-    <tr><th>显示的状态</th><th>什么意思</th><th>要不要动</th></tr>
-    <tr><td>已标定（本设备）</td><td>这台相机有自己的一份标定，且分辨率对得上</td><td>不用管，正常用</td></tr>
-    <tr><td>沿用旧标定文件（未绑定设备）</td><td>标定能用，但还不知道"属于哪台相机"（老版程序留下的文件）</td><td>确认就是这台相机标的，就点 <span class="kbd">绑定到本设备</span>；不确定就重标一次</td></tr>
-    <tr><td>本设备未标定</td><td>这台相机第一次用，或者换了新相机</td><td>按上面第 2 节标一次，以后不再弹</td></tr>
-    <tr><td>分辨率不符 / 属于另一台相机</td><td>旧标定对不上当前这台相机（换了相机或改了分辨率）</td><td>程序已自动停用这份内参（测距显示"不可测"），重新标定即可</td></tr>
-  </table>
-  <span style="opacity:.8">另外：笔记本 + USB 外接同时存在（多台摄像头）时，程序分不清正在用哪一台 ——
-  在下拉框里<strong>指认一下</strong>程序用的是哪台（是"确认身份"，不是"切换相机"），之后会记住。
-  标定成功后弹窗里那句「已按设备记住」出现，就说明记住了。</span>
-</div>
-
-<h2>3 · 卷尺三点测距（核心验收，约 15 分钟）</h2>
-<p>这一步就是 CHARTER 写死的验收标准，做的时候不用紧张，按下面来就行：</p>
-
-<div class="box warn-box">
-  <strong>先知道一件事：这套测距有「最近可测距离」，比它更近就<b>不能精确测</b> —— 这是几何决定的，不是模型问题。</strong><br>
-  主用的<strong>地面接触点法</strong>只有一条假设：<em>检测框底边踩在地面上</em>。所以相机必须看得见人的<strong>脚</strong>。
-  脚一旦掉到画面下边界之外，这个方法就无解 —— 这时程序<strong>不会拿别的数糊弄你</strong>：
-  它会<strong>降级</strong>给出一个明确标注过的<strong>参考值</strong>（读数后面带 <span class="kbd">？</span>），
-  再近就只剩<strong>定性警报</strong>（「目标过近，进入减速区」），一个数字都不编。<br><br>
-  <strong>最近可测距离 = 相机安装高度 ÷ tan(俯仰角 + 画面下半视场角)</strong>。
-  其中「画面下半视场角」是这台相机的固定值 = <code>atan((480 − cy) / fy)</code>，
-  按当前标定算是 <strong>14.0°</strong>。<br><br>
-  代入<strong>本机当前</strong>的配置（2026-09-25 自标定结果：<strong>H = 0.65 m、俯仰角 5.0°</strong>）：
-  <strong>最近可测 ≈ 1.9 m</strong>；2 m 处脚点离画面下边界只剩 <strong>约 15 px</strong> ——
-  所以人<strong>稍微往前一点，精确读数就没了</strong>，这是预期行为。<br><br>
-  <strong>卡住时先看原因</strong>：「目标距离」<strong>下面那行小字直接写着为什么</strong>
-  （不用再去悬停了，悬停里是同一句话）。
-  <strong>想让人走近一点也能测，就压低镜头（增大俯仰角）</strong> —— 按推荐公式，
-  你的高度（0.65 m）本应配 <strong>7.5°</strong>（`俯仰角 ≈ atan(H/2) − 10.5°`，H ≤ 0.9 m 时适用），
-  现在装的是 5.0°，差了 2.5°。改完的差别：
-  <table>
-    <tr><th>俯仰角</th><th>最近可测</th><th>2 m 处脚点余量</th><th>5 m 头顶</th><th>10 m 头顶</th></tr>
-    <tr><td>5.0°（现在）</td><td>1.88 m</td><td>15 px（很险）</td><td>入画</td><td>入画</td></tr>
-    <tr><td><strong>7.5°（推荐）</strong></td><td><strong>1.65 m</strong></td><td><strong>51 px</strong></td><td>入画（剩 9 px）</td><td>入画</td></tr>
-    <tr><td>10.0°</td><td>1.46 m</td><td>86 px</td><td>出画</td><td>入画</td></tr>
-    <tr><td>15.0°</td><td>1.17 m</td><td>155 px</td><td>出画</td><td>出画</td></tr>
-  </table>
-  <span style="opacity:.8">「头顶出画」只影响框跨度法（纵）与两法互检（近处的人只看得见身子），<strong>接触点法照样能测</strong>。
-  改完镜头角度后重做一次下面的第 2 步（<span class="kbd">求解安装参数</span> 会把新角度自己解出来），
-  也可以在设置页直接填俯仰角（会落盘）。重算这张表：
-  <span class="file">E:\WorkBuddy-Work\scripts\plan_near_field.py</span>（读 calib.json + mount.json 自动算）。</span><br><br>
-  <span style="opacity:.8">另：<strong>想让深度模型来救近场是行不通的</strong>（2026-09-25 两轮横评定案）：
-  Depth-Anything-V2 米制版（VKITTI）把贴着镜头的人报成 3.59 m；后来换的
-  <strong>UniDepthV2</strong>（能吃相机内参的版本）在 1.9~3 m 段中位误差仍有 <strong>35.6%</strong>，
-  越近越差 —— 近场正是这些模型的系统性盲区（训练数据里几乎没有 2 m 内的样本）。
-  近场改用下面的纯几何分层方案。</span>
-</div>
-
-<h3>0.6 ~ 2 m 这段怎么读（近场分层）</h3>
-<div class="box ok-box">
-  <strong>脚贴近画面底边之后，不再只剩一个「不可测」。</strong>程序按下面的分层给出能给的，并如实标注：
-  <table>
-    <tr><th>距离</th><th>读数形态</th><th>怎么用</th></tr>
-    <tr><td><strong>≥ 约 2 m</strong></td><td>精确值（标「接触点法 / 框跨度法（纵） / 两法一致」）</td><td>按 CHARTER 门槛验收</td></tr>
-    <tr><td><strong>约 0.6 ~ 2 m</strong></td><td><strong>参考值</strong>：读数带 <span class="kbd">？</span>，
-      方法写 <span class="kbd">框跨度法（横·参考）</span></td><td>只用来减速 / 保持距离，<strong>别当精确值记录</strong></td></tr>
-    <tr><td><strong>&lt; 约 0.6 m</strong></td><td>只有一句话：<span class="kbd">目标过近（…）：进入减速/制动区</span></td>
-      <td>定性就够：刹车不需要精确数字</td></tr>
-  </table>
-  <strong>为什么参考区从 ~2 m 就开始了（不是 1.85 m）</strong>：
-  检测模型在<strong>画面底边</strong>有 5~16 px 的系统性「欠检」——脚明明已经
-  走出画面，检测框的底边却停在离画面底边几像素的地方。用真实走近录像逐帧核对过
-  （2026-09-25）：这会让接触点法把<strong>任何更近的距离</strong>都算成最近可测
-  ~1.9 m，整段读数<strong>冻结</strong>。所以现在只要框底边进入画面底边
-  <strong>12 px</strong> 以内，程序就不再相信「框底边 = 脚」，自动降级成框跨度法（横）
-  参考值（或贴脸时的过近警报）。
-  <br><strong>这个判定带「滞回」</strong>（2026-09-26）：进 12 px 就降级，
-  但要<strong>再往回收 12 px</strong> 才恢复精确读数。为什么需要：检测框底边的帧间
-  抖动实测很大（P90 有 11~17 px），如果进出用同一条线，方法会在阈值线上
-  <strong>逐帧来回切</strong> —— 读数在 1.4 m 与 1.95 m 之间交替，TTC 和趋势
-  估计会被彻底带歪。加了滞回之后，方法切换次数下降约 <strong>79%</strong>。
-  代价是<strong>退出略滞后</strong>：在 456~468 px 这段缓冲带里会继续沿用参考值
-  （实测这些帧两种方法差值中位约 19 cm，且多数帧脚在几何上本来就不可能可见）。
-  所以：站在正好 2 m 附近时，你会看到<strong>一次</strong>「精确 → 参考」的切换，
-  这是如实的表现，不是故障；但<strong>不该看到它反复来回跳</strong> ——
-  若来回跳 3 次以上，说明滞回没生效，请告诉我。
-  <br><strong>参考值怎么来的</strong>：<code>距离 = fx × 框宽度 ÷ 检测框宽</code>。它天生是参考级，两条要记住：
-  <ul>
-    <li><strong>人一侧身就会高估</strong>（可见宽度从 0.47 m 缩到肩深约 0.25 m），
-      方向上会「显得比实际远」—— 所以它恒带 <span class="kbd">？</span>，别拿它判断安全距离；</li>
-    <li>抬臂、拎东西时框变宽 → 读数偏近（这个方向是安全的）。</li>
-  </ul>
-  <strong>它会用「被追踪的那个人的」框宽度，而不是一个通用值。</strong>但这个数
-  <strong>不是</strong>程序自己攒出来的 —— 必须先在<strong>「设置」页走一遍建档</strong>
-  （见 <strong>3.5</strong> 节）：让目标<strong>正面完整入画站定约 3 秒</strong>
-  （头、脚都在画面内、不贴边），程序才量出他的<strong>框跨度（纵 × 横）</strong>
-  并存进 <span class="file">models/person_profile.json</span>，状态栏提示
-  <span class="kbd">已建档 · person-1 框跨度 1.42 × 0.47 m</span>，同时响一声提示音。
-  之后他走近到参考区，用的就是量过的框宽度。<br>
-  <span style="opacity:.8">⚠️ <strong>建档量出的不是身高 / 肩宽</strong>
-  —— 检测器底边框到小腿、顶边框到额头，所以纵跨度比真身高小约 0.37 m
-  （1.79 m 的人量出来就是 1.42 m 左右）；横跨度含手臂，比肩峰宽大约 10~30%。
-  <strong>这是框法决定的，与标定好坏无关，改标定也改不掉</strong>，别拿卷尺身高去比。
-  <br>⚠️ <strong>2026-09-27 起，程序不再「站定就自动建档」</strong>
-  —— 没走建档流程时档案库一直是空的，本段读数只能用默认框宽度 0.46 m。
-  同一套档案还负责认人：按<strong>OSNet 外观嵌入</strong>区分不同的人
-  （躯干 HSV 直方图连「同一人的不同时段」都分不开，不再作主特征）。</span>
-</div>
-
-<div class="box">
-  <strong>读数会不会乱跳？—— 速度门控</strong><br>
-  人不会瞬移：0.1 秒内从 1.5 m 到 10 m 物理上不可能，出现这种跳变只可能是
-  <strong>检测框抓错了人 / 抓丢了</strong>。程序给距离变化设了人的速度上限
-  （8 m/s，博尔特冲刺约 10 m/s），超了就<strong>拦下这一帧的错值</strong>，
-  读数下写明原因，例如：<br>
-  <span class="kbd">速度门控拦截：0.10 s 内 1.50→10.00 m（隐含 85 m/s，超过人体极限 8 m/s，多半是检测跳变/抓错框）</span><br>
-  <strong>画面里真的换了个人怎么办？</strong>若新数值连续 3 帧互相一致，程序判定
-  「这是一段新的距离」并自动<strong>重新锚定</strong>（状态栏提示
-  <span class="kbd">连续 3 帧一致，已接受新距离段 …</span>）；目标消失超过 2 秒后，
-  下一个读数也直接当新锚点。所以门控不会把人永远锁死。<br>
-  <span style="opacity:.8">门控只作用于 <code>person</code>（全链路唯一类别）。</span>
-</div>
-
-<div class="box">
-  <strong>相机装多高、朝下多少度？</strong><br>
-  <strong>情况 A：高度你能自己选</strong>（三脚架 / 车顶支架可调）—— 在
-  <strong>1.08 m 以内尽量装高</strong>（装得越高，10 m 越不怕角度误差；超过 1.08 m
-  「2 m 的脚入画」和「10 m 目标全身入画」就不可兼得，超过 1.32 m 地平线出画、
-  超过 1.91 m 无解）。<br>
-  俯仰角：<strong>取"刚够让 2 m 的脚留在画面里"的那个最小角度</strong>，再留 3° 余量。
-  别为了"更准"把角度调大 —— 实测从 13° 调到 25°，精度只提升约 0.1%，却丢掉整个远场。
-  照这两条走，本机就是 <strong>1.00 m 配 14.4°</strong>（仓库 README 推荐表里的「均衡」那一档）。<br><br>
-  <strong>情况 B：高度被车体定死</strong>（挡风玻璃 / 保险杠，改不了）—— 这时
-  <strong>高度是给定的，你只能调俯仰角</strong>。拿你车上实测的高度查下表：
-  <table>
-    <tr><th>车上实测安装高度</th><th>该配的俯仰角</th><th>2 / 5 / 10 m 误差</th><th>备注</th></tr>
-    <tr><td>0.30 m</td><td><strong>−2.0°</strong>（略朝上）</td><td>3.9% / 5.9% / 10.3%</td><td>太低，精度一般</td></tr>
-    <tr><td>0.50 m</td><td><strong>3.5°</strong></td><td>2.3% / 3.6% / 6.2%</td><td></td></tr>
-    <tr><td>0.70 m</td><td><strong>8.8°</strong></td><td>1.7% / 2.6% / 4.4%</td><td>保险杠常见高度</td></tr>
-    <tr><td>0.90 m</td><td><strong>13.8°</strong></td><td>1.4% / 2.0% / 3.4%</td><td></td></tr>
-    <tr><td>1.00 m</td><td><strong>14.4°</strong></td><td>1.2% / 1.8% / <strong>3.1%</strong></td><td>什么都丢不掉的上限附近</td></tr>
-    <tr><td>1.20 m</td><td><strong>19.9°</strong></td><td>1.1% / 1.5% / 2.6%</td><td>10 m 目标只剩半身，<strong>互检不可用</strong></td></tr>
-    <tr><td>1.50 m</td><td><strong>26.4°</strong></td><td>0.9% / 1.2% / 2.1%</td><td>地面只看到 1.8~13.2 m</td></tr>
-  </table>
-  <span style="opacity:.8">表里没有你的高度就用这个式子算（本机相机，取整到 0.1°）：
-  <code>俯仰角 ≈ atan(高度 / 2) − 10.5°</code>（高度 ≤ 0.9 m 时适用）；
-  高度 0.9 ~ 1.08 m 用 <code>atan((高度 − 1.70) / 10) + 18.4°</code>；
-  <strong>高过 1.08 m 就要看仓库 README 的完整查表</strong>（那时"2 m 的脚入画"和
-  "10 m 目标全身入画"只能保一个）。</span><br><br>
-  <span style="opacity:.8">（上表按当前这台相机算出；换了相机或分辨率要重算 ——
-  完整 H→θ 查表（0.20~1.90 m 逐档）与公式见仓库 README 的「相机怎么装」。
-  顺带说一句：下面的第 2 步会把高度和角度<strong>自己解出来</strong>，
-  所以上面的表主要用来<strong>摆位</strong> —— 摆好之后让程序量，不必手工量。）</span>
-</div>
-<ol>
-  <li>找一段空地，用卷尺量出 <strong>2 米、5 米、10 米</strong> 三个位置，地上放个显眼的东西做标记（鞋、纸片都行）。</li>
-  <li><strong>先标定安装参数</strong>（这一步顺手就把三个位置用掉了，做一次就行）：
-    切到 <strong>「标定」页 → 第 ② 组「采样点标定（安装参数）」</strong>。
-    <div class="box ok-box">
-      <strong>为什么采样点标定搬到了「标定」页：</strong>记采样点和建档<strong>都要盯着画面</strong>
-      （要确认人完整入画、确实站在卷尺那个点上），所以这一页<strong>自带一块实时画面</strong>
-      —— 采点、建档都在这一页完成，不用在「监视」页和「设置」页之间来回切。<br><br>
-      <strong>这一页怎么排的：</strong>画面固定在页顶<strong>不动</strong>
-      （栏内<strong>左边是画面与检测框、右边是一个大号的距离数字</strong>），下面按
-      <strong>① 棋盘标定（内参）→ ② 采样点标定（安装参数）→ ③ 指纹建档</strong> 的顺序排，
-      三组在下方滚动。<strong>画面不跟着滚是有意的</strong>：滚到 ②③ 时你还得看得见画面，
-      否则采点和建档就成了"盲操作"。<br><br>
-      <strong>这一页的画面对人「一视同仁」</strong>：它只识别「有没有人」并显示距离，
-      <strong>不做追踪</strong> —— 就算你还没指定追踪目标、或者站的不是被追踪的那个人，
-      框和距离照常出现（详见 §3.5.2 末尾那个对照表）。
-    </div>
-    先确认 ② 组的 <span class="kbd">距离来源</span>，默认 <strong>「只量第 1 个距离，其余自动推」</strong>：
-    <strong>只有第 1 个点要拿卷尺量</strong>，之后换位置站着点就行 ——
-    <strong>不用再量</strong>（输入框会自动置灰），但<strong>必须换到明显不同的距离站好</strong>。
-    然后找到 <span class="kbd">已知距离（m）</span>：
-    <ul>
-      <li>让人站到 <strong>2 米</strong> 标记上、<strong>站直别动</strong>，
-        把 <span class="kbd">已知距离</span> 改成 <code>2.00</code>，点 <span class="kbd">记为采样点</span>；
-        等 1 秒，下面那行提示会告诉你采到多少帧、底边像素散布多少。</li>
-      <li>换到 <strong>5 米</strong>：这时 <span class="kbd">已知距离</span> 已自动置灰，
-        <strong>不用量、不用改数字</strong>，站定直接再点一次 <span class="kbd">记为采样点</span>；
-        再到 <strong>10 米</strong> 同样点一次。</li>
-      <li>三个点都记好后，点 <span class="kbd">求解安装参数</span>。弹窗里会给出
-        <strong>相机安装高度、俯仰角、以及各自的不确定度</strong>（例如 <code>±0.5 cm / ±0.08°</code>），
-        并自动填进安装参数、<strong>立即生效</strong>（② 组下面那行状态字会写出解出的高度与俯仰角）。</li>
-    </ul>
-    <div class="box ok-box">
-      <strong>为什么推荐点三次而不是两次：</strong>两点的方程有两个解（"低装 + 小平角"和"高装 + 大俯角"都吻合），
-      而且两点永远能<strong>严格拟合</strong>，所以查不出"把膝盖当成脚标了"这类错；三点就有富余，能靠残差自查。<br>
-      <strong>常见情况：</strong>提示"散布偏大"= 人还在动，让他站稳重采一次就行；
-      提示"距离太接近"= 两个标记太近，拉开差距（比如 2 m 和 10 m）。<br><br>
-      <strong>「不用量」≠「顺便站」：</strong>第 2、3 个点不用拿尺子，
-      但<strong>必须换到明显不同的距离</strong>（至少比已采的点远 1/4）。
-      原地不动再点一次会被当成同一点<strong>覆盖</strong>掉；只挪一点点则跨度不够，
-      高度与俯仰角会互相顶替、解出来的值乱跳。<strong>全程同一个人、同样站姿</strong>
-      即可 —— 其余点的距离按框高比推，人有多高在比值里会抵消掉。
-    </div>
-  </li>
-  <li>然后才是正式测距：让那个人站在 <strong>2 米</strong> 标记处，面向摄像头<strong>站直</strong>。</li>
-  <li>回到「监视」页。目标被框住后，旁边会显示类似 <span class="kbd">person 0.85 1.98m</span>；「目标位置」分组里的<strong>「目标距离」</strong>也会显示同一个数。
-    读数<strong>下面那行小字</strong>会说明这个数是怎么来的（<strong>接触点法 / 框跨度法（纵） / 两法一致</strong>）；
-    若是<strong>参考值</strong>，读数会带 <span class="kbd">？</span>、方法写 <span class="kbd">框跨度法（横·参考）</span>；
-    显示「不可测」时，那行小字<strong>就是原因</strong>（例如「脚被画面下边界裁掉（目标太近…）」），
-    <strong>不用再去悬停</strong>。带「？」或「不可测」的帧<strong>都不算</strong>，别硬记。</li>
-  <li>等数字<strong>稳定不闪了</strong>，记下来。然后在 5 米、10 米重复。</li>
-</ol>
+<h2>0 · 先认识一下界面 <span class="step">（1 分钟）</span></h2>
+<p>程序一共五个页签，这一步到下一步按顺序走就行：</p>
 <table>
-  <tr><th>实际距离</th><th>合格范围（CHARTER 标准）</th><th>软件显示值</th><th>显示的方法</th></tr>
-  <tr><td>2 m</td><td>1.70 ~ 2.30 m（误差 ≤15%）</td><td class="fill">____ m</td><td class="fill">______</td></tr>
-  <tr><td>5 m</td><td>4.25 ~ 5.75 m（误差 ≤15%）</td><td class="fill">____ m</td><td class="fill">______</td></tr>
-  <tr><td>10 m</td><td>8.00 ~ 12.00 m（误差 ≤20%）</td><td class="fill">____ m</td><td class="fill">______</td></tr>
+  <tr><th>页签</th><th>这一步用它干什么</th></tr>
+  <tr><td><strong>标定</strong></td><td>① 棋盘标定（内参）→ ② 采样点标定（装多高、朝下多少度）→ ③ 指纹建档</td></tr>
+  <tr><td><strong>设置</strong></td><td>指定追踪目标、管理人员档案</td></tr>
+  <tr><td><strong>监视</strong></td><td>看实时画面、距离读数、碰撞预警</td></tr>
+  <tr><td><strong>录制回放</strong></td><td>录一段、回放、看距离曲线</td></tr>
+  <tr><td><strong>深度分析</strong></td><td>看最近几秒的曲线（默认关闭，设置页勾选后才画）</td></tr>
+</table>
+
+<h2>1 · 打印棋盘格 <span class="step">（约 5 分钟）</span></h2>
+<ol>
+  <li>打印本文件夹里的 <span class="file">chessboard_A4_9x6_18mm.png</span>。
+    打印对话框里缩放<strong>必须选「实际大小 / 100%」</strong>，绝不能选「适应页面」。</li>
+  <li>拿尺子量图上那条标着 0 到 100 的<strong>校验尺</strong>：
+    <div class="box ok-box">
+      量出来正好 <strong>100 mm</strong> → 方格就是 18 mm，直接下一步。<br>
+      量出来不是 100 mm（比如 95 mm）→ 实际方格边长 = <code>18 × 实测量 ÷ 100</code>。<br>
+      例：量到 95 mm → 方格 = <strong>17.1 mm</strong>，这个数第 2 步要填进软件。
+    </div>
+  </li>
+  <li>把纸<strong>贴在硬纸板上压平</strong>。纸软了、卷了、有褶皱，标定精度都会掉。</li>
+</ol>
+
+<h2>2 · 标定相机（内参） <span class="step">（约 10 分钟，「标定」页 ① 组）</span></h2>
+<figure>
+  <img src="assets/ui-calibration.svg" alt="标定页界面示意图：画面区与①②③三组">
+  <figcaption>标定页：画面固定在顶部（左画面 + 右大号距离数字），下面按 ① 棋盘标定 → ② 采样点标定 → ③ 指纹建档 排列。</figcaption>
+</figure>
+<ol>
+  <li>运行 <span class="file">main_windows.py</span>。摄像头自动打开，模型自动加载 ——
+    状态栏出现「AI模型加载并初始化成功」就可以开始了，<strong>不用手动选模型</strong>。</li>
+  <li>切到 <strong>「标定」页 → ① 组「棋盘标定（内参）」</strong>：
+    <ul>
+      <li>棋盘格内角点：保持 <span class="kbd">9 × 6</span>（默认就是）</li>
+      <li>方格边长：填第 1 步量出来的实际值（<span class="kbd">17.1</span> 是本机打印机的实测值；<strong>换了打印机就要改这一格</strong>）</li>
+    </ul>
+  </li>
+  <li>点 <span class="kbd">开始采集</span>，然后拿起棋盘格<strong>慢慢换位置、换角度</strong>：
+    <ul>
+      <li>画面的<strong>各个角落</strong>都要有（左上、右下）</li>
+      <li>有正对的，也有<strong>左右倾、上下倾</strong>的（15°～40° 就够，不用太斜）</li>
+      <li>全程<strong>完整入画</strong>，一个角点都不能出画面</li>
+    </ul>
+  </li>
+  <li>看那行提示：<strong>「已采集 X 帧」</strong> 就是采上了；「当前帧未检测到棋盘格」就换个角度。
+    <strong>采到 15 帧以上</strong>就可以停（至少 10 帧）。</li>
+  <li>点 <span class="kbd">求解并保存</span>（不用先停止采集）。弹窗里会给出 <strong>fx、fy、重投影误差</strong>：
+    <div class="box ok-box">
+      重投影误差 <strong>&lt;0.5 优</strong>｜<strong>&lt;1.0 可接受</strong>｜≥1.0 建议重采一次。
+    </div>
+  </li>
+</ol>
+<div class="box">
+  <strong>标定结果按相机记住</strong>（像蓝牙配对）：这台相机标一次，以后插回来直接可用；
+  <strong>换了别的相机不会拿错内参</strong>，会提醒你重新标定。① 组顶部「本机摄像头」那栏
+  写着当前状态，看到 <strong>「已标定（本设备）」</strong> 就说明记好了。
+</div>
+
+<h2>3 · 采样点标定：让程序自己量出相机装多高 <span class="step">（约 5 分钟，② 组）</span></h2>
+<figure>
+  <img src="assets/calibration-steps.svg" alt="三步标定：棋盘标定、采样点标定、指纹建档">
+  <figcaption>①② 随设备做一次（换相机才重做），③ 每换一个人做一次。三步都要盯着画面确认人完整入画。</figcaption>
+</figure>
+<p>这一步解出<strong>相机安装高度 H 与俯仰角 θ</strong>。<strong>不需要量角器，也不用量相机装了多高</strong>
+—— 程序反解出来。你要做的只是让人在几个已知距离上各站一次。</p>
+<ol>
+  <li>用卷尺在地上量出几个距离点，做上标记。<strong>推荐 2 m / 5 m / 10 m 三点</strong>；
+    场地铺不开就取跨度尽量大的三点（比如 2 m / 3.5 m / 5 m），<strong>两点不推荐</strong>
+    —— 两点永远能完美拟合，查不出「把膝盖当成脚」这类标记错误。</li>
+  <li>让人<strong>站到第一个点上、站直别动</strong>，把 <span class="kbd">已知距离（m）</span>
+    填成这个距离，点 <span class="kbd">记为采样点</span>。</li>
+  <li>换到第二个点、第三个点，各点一次 <span class="kbd">记为采样点</span>。
+    （第 2、3 个点不用再拿尺子量，但<strong>必须真的换到明显不同的距离站好</strong>
+    —— 原地再点一次会覆盖掉前一个点。）</li>
+  <li>点 <span class="kbd">求解安装参数</span>。弹窗给出 <strong>安装高度、俯仰角和各自的不确定度</strong>
+    （例如 <code>±0.5 cm / ±0.08°</code>），自动写回并<strong>立即生效</strong>。</li>
+</ol>
+<div class="box warn-box">
+  <strong>提示「散布偏大」</strong> = 人还在动，站稳重采；<strong>「距离太接近」</strong> = 两个点挨得太近，拉开差距。
+</div>
+
+<h2>4 · 建档：让程序记住这个人 <span class="step">（约 3 分钟，③ 组）</span></h2>
+<p>要让程序「只跟某一个人」，得先让它认识这个人。<strong>光站在画面里不会自动建档</strong>，必须走这一步。</p>
+<ol>
+  <li>切到 <strong>③ 组「指纹建档」</strong>。<span class="kbd">采样点距离（m）</span>
+    填人站位到镜头的距离（用卷尺量）；不知道就留 0，让程序用当前测距值反解（需先完成第 2、3 步）。</li>
+  <li>让人<strong>正面全身完整入画</strong>（头脚都在画面里、不贴边），点 <span class="kbd">开始建档</span>。</li>
+  <li><strong>站定约 3 秒别动</strong>，程序连续采样，攒够稳定窗口就出结论。</li>
+  <li><strong>听提示音</strong>：
+    <ul>
+      <li><strong>响一声</strong> = 建档成功，大字写「已建档 · &lt;名字&gt;」。</li>
+      <li><strong>响两声</strong> = 建档失败，大字<strong>直接写出原因</strong>（例如量出的框跨度不在合理区间）。
+        越界的数据<strong>不会写进档案</strong> —— 按那句话走近些或退后些，再站一次。</li>
+    </ul>
+  </li>
+  <li>建完点 <span class="kbd">结束建档</span>。想给第二个人建档，重复一遍即可。</li>
+</ol>
+
+<h2>5 · 指定追踪目标 <span class="step">（约 1 分钟，「设置」页）</span></h2>
+<figure>
+  <img src="assets/ui-settings.svg" alt="设置页界面示意图：模型配置、检测配置、标定与系统、指纹档案管理">
+  <figcaption>设置页：检测配置里选追踪目标，下方「指纹档案管理（查 / 改 / 删）」管理已建的档案。</figcaption>
+</figure>
+<ol>
+  <li><strong>「设置」页 → 检测配置 → 追踪目标选择</strong>，下拉里选刚才建档的那个人。
+    想改名字点旁边的 <span class="kbd">重命名…</span>。</li>
+  <li>切到 <strong>「监视」页</strong>，看「目标类别」那一行：
+    <table>
+      <tr><th>显示</th><th>意思</th></tr>
+      <tr><td><code>老王（追踪中）</code></td><td>画面里这个人就是追踪目标，认上了</td></tr>
+      <tr><td><code>老王（本帧未认出）</code></td><td>画面里有人，但不是他 —— 这一帧<strong>不出数</strong></td></tr>
+      <tr><td><code>老王（画面无人）</code></td><td>画面里没检测到人</td></tr>
+      <tr><td><code>person</code></td><td>还没指定追踪目标，只报「检测到了什么」</td></tr>
+    </table>
+  </li>
+</ol>
+<div class="box warn-box">
+  <strong>认不出就不出数，这是设计。</strong>指定了追踪目标后，本帧匹配到的不是他
+  （是别人、或谁都没认出来），这一帧就当没这个人：不画框、距离显示「不可测」。
+  因为<strong>套在别人身上的距离看着正常、实际是另一个人的</strong>，比「不可测」更坏。<br>
+  做标定（①②③）时不受影响 —— <strong>标定页不做追踪，有框就画</strong>，否则人还没建档就没法标定了。
+</div>
+
+<h2>6 · 看读数 <span class="step">（「监视」页）</span></h2>
+<figure>
+  <img src="assets/ui-monitor.svg" alt="监视页界面示意图：原始图像、处理后的图像、目标位置、模型参数微调、系统性能">
+  <figcaption>监视页：左边两幅画面（原始 / 叠加了框与距离），右边是目标位置、参数微调与性能。</figcaption>
+</figure>
+<ul>
+  <li><strong>「目标距离」</strong>就是米制读数。它<strong>下面那行小字</strong>说明这个数怎么来的
+    （接触点法 / 框跨度法（纵）/ 两法一致），<strong>不可测时那行小字就是原因</strong>。</li>
+  <li><strong>「碰撞预警」</strong>给出碰撞时间 TTC，分三级：提示 ≤4 s ／ 预警 ≤2.5 s ／ 危险 ≤1.2 s。
+    站着不动或走远不出数，并写明原因。</li>
+  <li><strong>置信度 / NMS 阈值</strong>两根滑杆调完<strong>当场生效</strong>，不用重启。</li>
+  <li><strong>推理 FPS</strong> 才受模型影响，<strong>画面 FPS</strong> 是显示帧率 —— 掉帧时先看这两个的差。</li>
+</ul>
+
+<h3>走近了读不到数？这是几何限制</h3>
+<table>
+  <tr><th>距离</th><th>你会看到</th><th>怎么用</th></tr>
+  <tr><td><strong>≥ 约 2 m</strong></td><td>精确值（方法行写「接触点法 / 框跨度法（纵）/ 两法一致」）</td><td>按合格线验收</td></tr>
+  <tr><td><strong>约 0.6 ~ 2 m</strong></td><td><strong>参考值</strong>：读数带 <span class="kbd">？</span>，方法写「框跨度法（横·参考）」</td><td>只用来减速、保持距离，<strong>别当精确值</strong></td></tr>
+  <tr><td><strong>&lt; 约 0.6 m</strong></td><td>一句话：<span class="kbd">目标过近：进入减速/制动区</span></td><td>刹车不需要精确数字</td></tr>
+</table>
+<p class="meta">原因：主用的<strong>地面接触点法</strong>要求看得见脚。人一走近，脚就掉出画面下沿 ——
+这时程序<strong>不会拿别的数糊弄你</strong>，而是明确降级为带「？」的参考值，再近就只剩定性警报。
+想让更近的距离也有<strong>精确</strong>读数，就把镜头<strong>压低一点</strong>（增大俯仰角），
+然后重做第 3 步让程序重新解算。详见 <a href="相机怎么装.md">相机怎么装</a>。</p>
+
+<h2>7 · 录一段，回来看 <span class="step">（约 5 分钟，「录制回放」页）</span></h2>
+<figure>
+  <img src="assets/ui-replay.svg" alt="录制回放页界面示意图：录制、回放分析、测距曲线">
+  <figcaption>录制回放页：上面录、下面放，测距曲线随播放进度增长并按 TTC 分级着色。</figcaption>
+</figure>
+<ol>
+  <li>切到 <strong>「录制回放」页</strong>，点 <span class="kbd">开始录制</span>。</li>
+  <li>让人<strong>从近处走到远处再走回来</strong>，录 30~60 秒。</li>
+  <li>点 <span class="kbd">停止录制</span>，弹窗显示时长、帧数、丢帧数（丢帧应为 0）。
+    录完会<strong>自动加载</strong>到回放页，不用手动选。</li>
+  <li>点 <span class="kbd">播放</span>：视频正常播、<strong>曲线跟着进度条一起长</strong>、
+    距离随人走远走近而起伏。曲线<strong>按 TTC 分级着色</strong>
+    （灰=无告警 → 琥珀=提示 → 深橙=预警 → 红=危险），
+    所以「什么时候开始危险」可以直接从颜色上看出来。</li>
+</ol>
+<div class="box">
+  <strong>画面和检测结果是分开存的</strong>（视频轨 + 数据轨），检测框<strong>没有烧进像素</strong>。
+  所以标定改了、参数改了，同一段录像可以<strong>重新解算一遍</strong>再对比。
+</div>
+
+<h2>8 · 读数记在这里（自己留档）</h2>
+<p>让人依次站到 2 / 3 / 4 / 5 m，每个点等读数稳定后记下来：</p>
+<table>
+  <tr><th>实际距离</th><th>合格范围（误差 ≤15%）</th><th>软件读数</th><th>方法行</th></tr>
+  <tr><td>2 m</td><td>1.70 ~ 2.30 m</td><td class="fill">____ m</td><td class="fill">______</td></tr>
+  <tr><td>3 m</td><td>2.55 ~ 3.45 m</td><td class="fill">____ m</td><td class="fill">______</td></tr>
+  <tr><td>4 m</td><td>3.40 ~ 4.60 m</td><td class="fill">____ m</td><td class="fill">______</td></tr>
+  <tr><td>5 m</td><td>4.25 ~ 5.75 m</td><td class="fill">____ m</td><td class="fill">______</td></tr>
 </table>
 <div class="box warn-box">
-  <strong>注意</strong>：现在主用的<strong>地面接触点法不依赖被测人的身高</strong>（它只看"脚踩在地上那个点在画面里的高低"），
-  所以矮个子、小孩、椅子、狗都能测 —— 不需要再为"人不是 1.70 米"修正换算。<br>
-  如果某个点的读数标成了 <strong>「框跨度法（纵）」</strong>，说明那一帧脚看不见、是靠框跨度算的；
-  标成 <strong>「框跨度法（横·参考）」</strong>或带 <strong>「？」</strong> 的，是近场参考值或两法存疑 ——
-  三者都<strong>不算三点验收的数</strong>，<strong>把这个情况一起告诉我</strong>，这本身就是验收信息。
-</div>
-
-<h3>顺手验收一下近场（可选，1 分钟）</h3>
-<div class="box">
-  让人站到 <strong>1.2 m</strong>（脚肯定出画的距离）：
+  <strong>两点说明：</strong>
   <ul>
-    <li>读数应该出现一个<strong>带「？」的参考值</strong>（方法写「框跨度法（横·参考）」），而不是「不可测」；</li>
-    <li>拿卷尺比一下，误差在 <strong>±20% 以内</strong>就算正常（参考级，要求别太高）；</li>
-    <li>再让他往前走，直到读数变成 <span class="kbd">目标过近（…）：进入减速/制动区</span> ——
-      记下这时的大致距离（约 0.6 m 左右）；</li>
-    <li><strong>再验一个「走回」的动作</strong>：让人从 2 m 慢慢走向镜头再走回来，
-      读数应该<strong>一路跟着变小</strong>（2 → 1.5 → 1 → 0.8 …），
-      <strong>绝不能停在一个数上不动</strong>——曾有一个 bug 就是「走回段读数
-      整段冻结在 1.9」，这一步就是它的看门检查。</li>
-    <li>同时留意<strong>方法列</strong>：全程应只出现<strong>一次</strong>
-      「精确 → 参考」的切换（2026-09-26 起该判定带滞回）。若在阈值附近
-      反复来回跳 3 次以上，说明滞回没生效。</li>
+    <li>接触点法<strong>不依赖被测人的身高</strong>（它只看脚踩在地上那点在画面里的高低），
+      所以高矮不同的人都能测，不用换算。</li>
+    <li>带 <strong>「？」</strong> 的参考值、写着「框跨度法（横·参考）」的、以及「不可测」的帧
+      <strong>都不算</strong> —— 别硬记成验收读数。</li>
+    <li>本期只验收 <strong>≤5 m</strong>。更远的点可以记，但判据里那条 >5 m 的分支
+      <strong>本期未验证</strong>，对外报数必须带范围限定。</li>
   </ul>
-  <span style="opacity:.8">这段读数<strong>不计入</strong> CHARTER 门槛，只用来确认「近场不再是一片空白」。</span>
 </div>
 
-<h2>3.5 · 建档、指定追踪目标、管理档案（约 4 分钟）</h2>
-<div class="box">
-  这一步定的是<strong>「跟谁」</strong>：程序只对<strong>被指定的那一个人</strong>给距离和 TTC。
-  要能「跟人」，先得让程序<strong>认识这个人</strong> —— 所以这一节分三小步：
-  <strong>3.5.1 建档</strong>（让程序记住一个人）→ <strong>3.5.2 指定追踪目标</strong>（选跟谁）
-  → <strong>3.5.3 档案管理</strong>（查 / 改 / 删）。
-  <hr style="opacity:.25">
-
-  <h3 style="margin:.2em 0 .4em">3.5.1 · 建档 —— 让程序记住这个人（约 1.5 分钟）</h3>
-  <p style="margin-top:.2em">档案存在
-    <span class="file">models/person_profile.json</span>，是程序认人的<strong>唯一参照物</strong>；
-    没有档案，程序就无从区分「登记者」和「陌生人」。建档是一个<strong>主动的动作</strong>，
-    光让目标在画面里站定<strong>不会</strong>产生档案（2026-09-27 起程序不再自动建档）。</p>
-  <ol>
-    <li>切到 <strong>「标定」页 → 第 ③ 组「指纹建档（让程序记住这个人）」</strong>。</li>
-    <li><strong>先告诉程序「这个人现在站的这点离镜头多远」</strong> —— 有二选一：
-      <ul>
-        <li><strong>手填（推荐，可绕过标定）</strong>：把
-          <span class="kbd">采样点距离（m）</span> 填成实测值（用卷尺量人站的点到镜头的地面距离），
-          填了它就<strong>优先用它反解框跨度</strong>，不需要先完成标定；</li>
-        <li><strong>留 0 用测距反解</strong>：需先完成<strong>第 2 节 · 相机标定</strong>，程序用当前测距值反解。</li>
-      </ul>
-      <span style="opacity:.8">未标定又留 0 时，点「开始建档」会弹窗提醒你补标定或填距离 ——
-      这是保护，不是故障。</span></li>
-    <li>让目标<strong>正面完整入画</strong>（全身进框、不要只露半身），点
-      <span class="kbd">开始建档</span>。</li>
-    <li>让目标<strong>站定约 3 秒</strong>别走 —— 程序会连续采样，采够<strong>稳定窗口</strong>
-      （≥12 帧、框跨度波动 CV ≤ 5%）才提交一次档案。配合着站，别急着动。</li>
-    <li><strong>听到提示音 = 有结论了，两种结论用声音与文字分开</strong>：
-      <ul>
-        <li><strong>响一声</strong> = <strong>建档成功</strong>：大字显示
-          「已建档 · &lt;名字&gt; …」并<strong>保留约 5 秒</strong>
-          （这行是给你看的，不会被下面的实时进度立刻冲掉）。</li>
-        <li><strong>响两声</strong> = <strong>建档失败</strong>：大字直接写出原因，
-          例如「反解框跨度（纵）1.22 m 不在 1.40–2.00 m 之间 · 这次<strong>没有</strong>写进档案」。
-          <strong>越界的数据会被过滤掉、不会存进档案</strong>（存错了以后每一帧测距都会偏），
-          按界面那句话改一改（走近些 / 退后些）再站一次即可。</li>
-      </ul>
-      大字下面那行小字全程都在说「现在差什么」：匹配分数 / 实时反解框跨度与要求区间 /
-      采样进度 / ⚠️ 当前卡在哪一步 —— 站在镜头前不用猜，也不用干等。</li>
-    <li>想再建一个（比如第二位同事），直接重复第 2~4 步即可，
-      <strong>同名会自动累加更新</strong>（同一个人多次采样会 EMA 更新，不是新增一条）。</li>
-    <li>建完点 <span class="kbd">结束建档</span> 收工 ——
-      之后程序切回<strong>「只认人、不采样」</strong>的被动状态，不会继续写档案。</li>
-  </ol>
-  <span class="note">程序提取的是 <strong>OSNet 外观嵌入</strong>（512 维、L2 归一化），
-  比对用<strong>余弦相似度</strong> —— 它对同一人的时间/光照变化比早先的「躯干衣着直方图」稳得多。
-  嵌入会记下<strong>出自哪个模型</strong>；若以后换了嵌入模型，旧档案里的嵌入与新的
-  <strong>不同源、不可比</strong>，程序会<strong>跳过</strong>它们比较（而不是算出一个看着正常、
-  其实没意义的分数）—— 换模型后需要重新建档。
-  <br><span style="opacity:.8">实测：OSNet 嵌入对<strong>同一人的时间/光照变化</strong>比外观直方图稳得多
-  （同会话 vs 跨会话的差值 +0.090，直方图只有 +0.014）。
-  ⚠️ 但这量的是「同一个人稳不稳」，<strong>不是「不同人分不分得开」</strong> ——
-  后者还没有数据，也正是门槛只能先占位的原因。阈值见下一段说明。</span></span>
-  <div class="box" style="background:rgba(255,196,0,.08);border-left:3px solid #f0a800">
-    <strong>门槛值仍是占位值（尚未校准）。</strong>代码里的
-    <code>reid_match_threshold = 0.50</code> 目前取的是<strong>同一个人的跨会话实测中位
-    （约 0.502）</strong>作为锚点定的，<strong>但没有录过「异人」样本</strong> ——
-    也就是说「陌生人之间通常能有多像」这个分布尚无数据。
-    所以现在的门槛能挡住明显不像的人，<strong>但「陌生人刚好超过 0.50」的概率还没量过</strong>。
-    界面上会<strong>同时显示分数与门槛</strong>（如
-    「匹配：嵌入(余弦) 0.855 / 门槛 0.500」），就是为了让「认不出」和「门槛定错了」
-    这两种情况<strong>当场能分得清</strong>。要把它变成<strong>校准值</strong>，
-    需要录一段<strong>「已知不同人」</strong>的视频（见 §4），这也是 §5 要回传的一项。
-  </div>
-
-  <h3 style="margin:.8em 0 .4em">3.5.2 · 指定追踪目标（约 1.5 分钟）</h3>
-  <ol>
-    <li>切到 <strong>「设置」页 → 检测配置 → 追踪目标选择</strong>。
-      下拉里列的是<strong>指纹档案</strong>（存在
-      <span class="file">models/person_profile.json</span>），每项后面标着来源。
-      <span style="opacity:.8">（下拉右边还有 <span class="kbd">重命名…</span>，
-      以及本页下方新增的 <strong>「指纹档案管理」</strong> —— 查 / 改 / 删都在那里，
-      见 <strong>3.5.3</strong>。）</span></li>
-    <li><strong>还没有任何档案？</strong>下拉会显示「（尚无指纹档案）」、
-      「重命名…」按钮<strong>置灰</strong> —— 说明你还没走过 3.5.1 的建档那一步。
-      先回去建档，再回到这里。</li>
-    <li>选中<strong>要跟的那个人</strong>，状态栏会确认「追踪目标已指定：&lt;名字&gt;…」。
-      想改名字就点右边的 <span class="kbd">重命名…</span>，起个好认的（比如「老王」）。</li>
-    <li><strong>验证它真的记住了</strong>：关掉程序重新打开，回到这一页 ——
-      选中的那条<strong>应该还在</strong>（档存在文件里，文件才是唯一真相），名字也是改过的那个。</li>
-  </ol>
-  <div class="box ok-box">
-    <strong>指定完，去「监视」页看「目标类别」那一行 —— 它会告诉你追踪有没有生效</strong>
-    （2026-09-29 起）：
-    <table>
-      <tr><th>你看到的</th><th>意思</th></tr>
-      <tr><td><code>person</code>（或标签文件里的类别名，如「人」）</td><td>还没指定追踪目标，这一行只报"检测到了什么"</td></tr>
-      <tr><td><code>老王（追踪中）</code></td><td>画面里这个人<strong>就是</strong>你指定的追踪目标，认上了</td></tr>
-      <tr><td><code>老王（本帧未认出）</code></td><td>画面里有人，但<strong>不是</strong>他（或者刚站进来还没认出来）—— 追踪<strong>没</strong>作用在这一帧上</td></tr>
-      <tr><td><code>老王（画面无人）</code></td><td>画面里没有检测到人</td></tr>
-    </table>
-    这样不用切页、不用看分数，扫一眼就知道"跟的是不是我指定的那个人"。
-    更细的匹配分数与门槛仍在<strong>「标定」页 ③ 组</strong>建档区下方那行。
-  </div>
-  <div class="box ok-box">
-    <strong>没认出来就真的不出数（2026-09-29 起）</strong>
-    <p style="margin:.4em 0">指定了追踪目标之后，只要本帧匹配到的<strong>不是他</strong>
-    （认成了别人、或谁都没认出来），这一帧就<strong>当没这个人</strong>处理 ——
-    陌生人站到镜头前，你不会再看到「一个套在他身上的框 + 一个数」：</p>
-    <table>
-      <tr><th>位置</th><th>表现</th></tr>
-      <tr><td>画面叠加</td><td><strong>不画框</strong>，左上角写橙色 <code>Not Target</code>
-        （画面里真没人时写的是 <code>No Target</code>，两种不一样，别混）</td></tr>
-      <tr><td>距离读数</td><td><code>不可测</code></td></tr>
-      <tr><td>读数下面那行</td><td><code>本帧这个人和追踪目标「老王」对不上（相似度 0.450 &lt; 门槛 0.500） —— 已丢弃这个检测框，距离按不可测</code></td></tr>
-      <tr><td>碰撞预警（TTC）</td><td>落回 <code>--</code>，原因写「测距不可用」</td></tr>
-    </table>
-    <p style="margin:.4em 0 0">为什么连距离一起拦：距离、速度门控、TTC 全是
-    <strong>针对这一个体</strong>的量，套在别人身上给出来的数字看着正常、实际是另一个人的 ——
-    比「不可测」更坏。</p>
-  </div>
-  <span class="note">⚠️ 四条<strong>不拦</strong>的情况（代码里逐条写了理由，少一条都会误伤）：
-  ① 没指定追踪目标；② 正在建档（「标定」页 ③ 组，刚开档的人当然还认不出来）；
-  ③ 正在记采样点（「标定」页 ② 组，自标定看的是<strong>框底边像素</strong>、与画面里是谁无关）；
-  ④ 认人这一帧<strong>根本没算</strong>（相机没标定 / 画面里没人）、或<strong>档案里没有可比嵌入</strong>
-  ——「没算」不等于「算出来不是他」，拦下去会把整屏都黑掉。</span>
-  <span class="note">⚠️ 代价说清：同一个人跨会话本来就只有约 <strong>94%</strong> 的帧过门槛
-  （2026-09-29 那段 0m→6m→0m 录制实测 234/249，最长连续被拦 6 帧 ≈ 0.29 s），
-  所以<strong>他自己</strong>站定时偶尔闪一下「不可测」是正常现象。
-  各距离档的实测放行率：<strong>0–1 m（贴脸）86%</strong>（最差的一档 —— 框几乎占满
-  画面，躯干裁切被头部/背景污染），<strong>1–2 m 100%、2–3 m 100%、3–4 m 100%、
-  4–5 m 100%、5–7 m 100%</strong>。也就是说<strong>越远反而越稳</strong>，
-  不用担心"站远了测不到"。（10 m 档无样本，但趋势如此。）
-  要让数字变好，唯一正确的做法是<strong>拿真人数据把 0.50 这个门槛校准掉</strong>
-  （见 §6 里「人明明在画面里，匹配分数却很低」那条）。</span>
-  <span class="note">⚠️ 做<strong>卷尺三点验收</strong>（§2）时如果读数一直显示「不可测」，
-  先看读数下面那行：若写的是「不是追踪目标…」，说明认人那一关没过
-  —— 把「追踪目标」设为<strong>「（不指定）」</strong>再测即可（验收是标定动作，
-  与认谁无关）。</span>
-  <span class="note">指定追踪目标另一件已经生效的事：<strong>近场框跨度法（横）改为恒用该目标档案里的框宽度</strong>
-  （这正是建档的意义）；没指定时程序沿用旧行为（本帧匹配到谁就用谁的框宽度）。</span>
-
-  <div class="box ok-box">
-    <strong>标定页那一栏 = 左画面 + 右大号距离数字，而且这一栏不做追踪（2026-09-29 起）</strong>
-    <p style="margin:.4em 0">标定页顶那块画面和监视页的 AI 画面<strong>不再是同一个口径</strong>：
-    栏内左边是画面与检测框，右边是一个大字号的当前距离。</p>
-    <table>
-      <tr><th>页</th><th>画面叠加</th><th>距离</th></tr>
-      <tr><td>监视页</td><td>追踪口径：认不出就<strong>丢框</strong>、写 <code>Not Target</code></td>
-        <td><code>不可测</code>（外加下面那行原因）</td></tr>
-      <tr><td>标定页</td><td>只识人口径：<strong>有框就画</strong>，不看「是不是追踪目标」</td>
-        <td>右侧大数字＝<strong>拦截之前</strong>的测距结论</td></tr>
-    </table>
-    <p style="margin:.4em 0"><strong>为什么必须有这个区别</strong>：① 棋盘 / ② 采样点 / ③ 建档
-    三步都得<strong>看着画面</strong>确认目标完整入画；如果标定页也套追踪口径，站到镜头前的人
-    只要没匹配上就会被<strong>连框一起抹掉</strong>，等于没法标定 —— 所以标定页只识人、不追人。</p>
-    <p style="margin:.4em 0 0">⚠️ <strong>别把两页的读数当成互相矛盾</strong>：监视页给的是
-    「<strong>被追踪的那个人</strong>」的数，标定页给的是「<strong>这一帧测出来多少</strong>」。
-    做标定（①②③）时看标定页；日常监视看监视页。两边的数字格式一致（存疑带 <code>？</code>，
-    不可测就写 <code>不可测</code>，鼠标悬停给原因）。</p>
-    <p style="margin:.4em 0 0">画面里没人 / 不是人 / 相机未标定时，标定页那个大数字会
-    <strong>清空回到「不可测」</strong>，不会留着上一个人的读数；回放时它显示录制里的规范距离。</p>
-  </div>
-
-  <h3 style="margin:.8em 0 .4em">3.5.3 · 档案管理：查 / 改 / 删（约 1 分钟）</h3>
-  <p style="margin-top:.2em">2026-09-29 新增。切到 <strong>「设置」页 → 下方「指纹档案管理（查 / 改 / 删）」</strong>：</p>
-  <ul>
-    <li><strong>查</strong>：列表每行一条档案，写着
-      <span class="kbd">名字　框跨度 纵 x.xx m × 横 x.xx m　有/无嵌入</span>；
-      当前<strong>追踪目标</strong>那条前面带 <strong>★</strong>。点中一行，下面会显示它的
-      <strong>档案 ID、来源、稳定窗口、建档时间</strong>。</li>
-    <li><strong>改</strong>：选中后点 <span class="kbd">重命名…</span> 改名 —— 改完<strong>立刻落盘</strong>，
-      重开程序仍是新名字（和 3.5.2 那个按钮是同一件事）。</li>
-    <li><strong>删</strong>：选中后点 <span class="kbd">删除</span>，会<strong>先弹二次确认</strong>
-      （写明删哪一条、不可撤销）。若删掉的正是<strong>当前追踪目标</strong>，
-      指定会<strong>一并解除</strong> —— 不会留下一个指向「已不存在的人」的设定。</li>
-    <li><span class="kbd">刷新</span>：重新从文件读一遍（一般切页回来会自动刷）。</li>
-  </ul>
-  <div class="box warn-box">
-    <strong>删除就是直接从 <span class="file">models/person_profile.json</span> 里去掉这条记录，
-    不进回收站。</strong>档案是程序认人的唯一参照物，删掉只能<strong>重新建档</strong>。<br>
-    档案库为空时三个按钮都是灰的，下面会提示你去「标定」页第 ③ 组建档。
-  </div>
-</div>
-
-<h2>4 · 录一段真实视频（约 5 分钟）</h2>
-<ol>
-  <li>切到 <strong>「录制回放」页</strong>，点 <span class="kbd">开始录制</span>。
-    <strong>录制过程中曲线就会实时长出来</strong>（从空开始、逐帧向右延伸），
-    不用等回放 —— 这也是判断"录到没有"最直观的一眼。</li>
-  <li>让那个人<strong>从 3 米处走到 10 米处，再走回来</strong>（录 30~60 秒）。中途可以在 5 米附近停一停。</li>
-  <li>点 <span class="kbd">停止录制</span>，弹窗里显示<strong>时长、视频帧数、数据轨条数、丢帧数</strong> —— 记下来（丢帧应该是 0，不是 0 也告诉我）。
-    弹窗还会多报一行 <strong>ReID 旁路</strong>（写出条数 / 丢弃 / 失败）：这是录制时顺手采的
-    <strong>外观特征</strong>数据，落在同一会话目录的 <code>reid.jsonl</code> 里，
-    <strong>只记录、不参与任何判断</strong> —— 一并记下来即可。
-    录完会<strong>自动加载</strong>到回放页（信息行显示「已加载：session-…」），不用再手动选，
-    刚录出来的那条曲线会<strong>原样留着</strong>。</li>
-  <li>把进度条拖回最左边（或点 <span class="kbd">停止</span>），再点 <span class="kbd">播放</span>
-    （回放页已自动加载刚录的这段；要看以前的录像，点
-    <span class="kbd">选择录制</span>，会列出所有录像供挑选）。
-    <ul>
-      <li>视频能正常播？</li>
-      <li><strong>曲线有没有跟着进度条一起长？</strong>刚开始播放时曲线应该是<strong>空的</strong>，
-        播到哪里就画到哪里；拖进度条时曲线会<strong>立刻</strong>跟到那个位置
-        （拖到最右可以一眼看完整条曲线）；按 <span class="kbd">停止</span> 后进度条回起点、曲线同时清空。
-        如果出现"加载时就已经画满、播放时一动不动"，或者"曲线走一半、进度条走完了"，
-        请记下来告诉我。</li>
-      <li>下面的<strong>测距曲线</strong>有没有跟着人的走远/走近起伏？（走近距离变小、走远变大）。
-        就一条<strong>去噪后</strong>的距离线（和「监视」页实时看到的读数是同一个值），
-        而且<strong>按 TTC 分级变色</strong>：<strong style="color:#828282">灰=无告警</strong>、
-        <strong style="color:#854f0b">琥珀=提示</strong>、<strong style="color:#993c1d">深橙=预警</strong>、
-        <strong style="color:#a32d2d">红=危险</strong>，颜色分界处的图例写着各级阈值。
-        所以一段录像里"什么时候开始危险"是可以直接从颜色上看出来的 ——
-        走近那段应该出现暖色，走远的 / 站着的那段是灰色。
-        换色的地方曲线应该<strong>连着</strong>，不该断开。</li>
-      <li><strong>注意图上只该有"一条"曲线</strong>：同一颜色如果出现了好几段
-        （比如灰色在前面一段、中间夹了暖色、后面又是灰色），这几段之间
-        <strong>不该有横穿整幅图的直线</strong>把它们连起来 —— 那种横线说明
-        画法有问题（2026-09-26 发生过一次：直连的同色段在白图上像"好多条线"，
-        实际是同一级被硬连的），记下来告诉我。
-        同色的段之间应当是断开的。</li>
-      <li>回放速度像"当时的速度"吗？一段 30 秒的录制，回放也该花约 30 秒。
-        （回放按录制时的真实帧率走，不再按名义 30fps 快放。）</li>
-    </ul>
-  </li>
-  <li>（可选）切到 <strong>「深度分析」页</strong>看两条新图：
-    <ul>
-      <li><strong>TTC 分析</strong>：碰撞时间曲线，图上有三条虚线（提示 4.0s / 预警 2.5s / 危险 1.2s），
-        下面一行写着当前 TTC 告警状态；人走远或站定时显示「TTC 告警：无」是正常的。
-        （三条虚线的颜色与监视页告警色一致：琥珀 / 深橙 / 红。）</li>
-      <li><strong>目标距离分析</strong>：距离曲线<strong>只有两种颜色</strong>（绿=有读数、红=无读数）；
-        <strong>测不到的时段</strong>（没检出目标、或检出了但不可测、或认出的是别人）会画成
-        <strong style="color:#d62828">红色的 0 线</strong>
-        （图例写「未知」）—— 距离被拉到 0 并标红，就是告诉你「这一段测不到」，
-        曲线本身<strong>不会断</strong>（落下到 0、再回到读数是连着的）。
-        绿线那条的图例写的是<strong>谁</strong>：指定了追踪目标就写<strong>指纹名</strong>
-        （如 <code>lsy</code> —— 那条线上只可能有他的读数），没指定时才写「人」。
-        曲线下方一行显示当前用的测距方法。（图上<strong>不画</strong>方法切换的竖虚线 ——
-        那种贴边文字会把纵轴越推越长，曲线反而看不清；方法名看下面那行就够了。）</li>
-    </ul>
-  </li>
-</ol>
-
-<h2>5 · 你要发给我的信息（照着抄就行）</h2>
-<div class="box">
-<ol>
-  <li>校验尺实测量：______ mm（如果不是正好 100）＋你换算的方格边长：______ mm</li>
-  <li>标定弹窗：fx = ______　fy = ______　重投影误差 = ______ px</li>
-  <li><strong>安装参数自标定</strong>：相机安装高度 = ______ m（±______ cm）　俯仰角 = ______ °（±______ °）　残差 = ______ px</li>
-  <li>三个距离读数：2m 处显示 ______ m　5m 处显示 ______ m　10m 处显示 ______ m（各自的方法是：______ / ______ / ______）</li>
-  <li>被测人的实际身高：______ m</li>
-  <li>录制弹窗：时长 ______ s　视频 ______ 帧　数据轨 ______ 条　丢帧 ______　ReID 旁路 ______ 条（丢弃 ______ / 失败 ______）</li>
-  <li>回放正常吗：视频 □能 □不能　测距曲线 □有起伏 □平的 □没有曲线</li>
-  <li>曲线是"一条"吗：□是一条、只有颜色分段 □同色多段之间有横穿的直线（记下在哪几段）</li>
-  <li>曲线跟随进度：播放时 □跟着长 □一开始就画满 □不跟随　拖进度条 □立刻跟到该位置 □没反应　按停止 □进度条与曲线一起归零 □只有进度条归零</li>
-  <li>录制时曲线：□一开始就从空往右长 □一开录制就有 □完全没有　回放耗时约 ______ 秒（应与录制时长接近）</li>
-  <li>中间弹过任何报错吗：□没有 □有（把文字抄给我或截图）</li>
-  <li>「标定」页 ① 组「本机摄像头」那栏最后显示的状态：__________（最好是「已标定（本设备）」）</li>
-  <li>实测最近能测到多近：约 ______ m（人再往前走，精确读数就消失、变成带「？」参考值的那个距离）</li>
-  <li>近场参考值准不准：1.2 m 处显示 ______ m（带「？」）；进入「过近警报」的大致距离：约 ______ m</li>
-  <li><strong>建档走通了吗</strong>（「标定」页第 ③ 组）：□点「开始建档」后听到了提示音
-    □页面大字显示「已建档 · &lt;名字&gt;」□档案落进
-    <span class="file">models/person_profile.json</span>（记下条数 ______）
-    <span style="opacity:.75">（注：<strong>只让目标站在画面里不会建档</strong>，必须走第 ③ 组那一步 —— 2026-09-27 起不再自动建档）</span></li>
-  <li><strong>越界数据被拦住了吗</strong>：故意在很远/很近的地方站定一次，看它是不是
-    □<strong>响两声</strong>并显示「建档失败 · 反解框跨度（纵）x.xx m 不在 1.40–2.00 m 之间」
-    □明说「这次没有写进档案」□档案条数<strong>没变</strong>（______ 条）。
-    <span style="opacity:.75">（这是 2026-09-29 新增的过滤 + 提示；以前这种情况是静默不建档，
-    用户站在镜头前只能干等。）</span></li>
-  <li>建档量出的<strong>框跨度</strong>：纵 ______ m × 横 ______ m
-    （<strong>不是身高/肩宽</strong>：纵跨度比卷尺身高小约 0.37 m 属正常 ——
-    与先验 1.41 m 相比：□相符 □差得多，记下差多少）</li>
-  <li><strong>认人准不准（关键）</strong>：让<strong>已建档的本人</strong>站到镜头前，看匹配行写的分数 ______（应偏高，接近或超过门槛）；
-    再让<strong>一个没建过档的另一个人</strong>站到同样位置，看分数 ______（应明显偏低）。
-    <span style="opacity:.75">这一步就是给门槛找依据用的 —— 现在门槛 0.50 是<strong>占位值</strong>，
-    「异人之间通常能有多像」还没量过。两人的分数差得越开，认人越可靠。</span></li>
-  <li><strong>追踪目标</strong>：下拉里一共 ______ 条档案；选的那条名字是 __________（来源标记：□已建档 □自动）；
-    关掉程序重开后 □选中项还在 □变成第一条了 □列表空了</li>
-  <li>「重命名…」试过吗：□改成功且重开仍生效 □改了但重开变回去 □按钮是灰的（档案库为空）</li>
-  <li>「指纹档案管理」（设置页下方，2026-09-29 新增）试过吗：
-    列表 ______ 行；选中一行 □下面写出了档案 ID / 来源 / 稳定窗口；
-    <span class="kbd">重命名…</span> □成功；<span class="kbd">删除</span> □弹了二次确认
-    □删完列表与档案文件同时少一条（删的是追踪目标时 □指定被一并解除）</li>
-</ol>
-</div>
-
-<h2>6 · 常见问题</h2>
+<h2>9 · 出问题先看这里</h2>
 <table>
   <tr><th>现象</th><th>多半是</th><th>怎么办</th></tr>
-  <tr><td>一直显示"未检测到棋盘格"</td><td>棋盘没完整入画 / 太斜 / 光线太暗 / 纸反光</td><td>挪远一点让棋盘全部入画，倾斜别超过 45°，别让灯直射纸面</td></tr>
-  <tr><td>目标框都没有</td><td>模型没加载成功；也可能是检测没跑起来、目标太小</td><td>先看状态栏有没有「AI模型加载并初始化成功」：没有就检查「模型文件」「标签文件」两个框里的路径还在不在、点一次 <span class="kbd">应用参数</span>；再确认「监视」页有画面；人很远时框会小于最小像素限制，走近些</td></tr>
-  <tr><td>有框但没距离数字</td><td>没标定成功</td><td>看「标定」页 ① 组的标定状态是不是"已标定"；不是就回到第二步重做（「目标距离」会显示"不可测"）</td></tr>
-  <tr><td>有框，但人一走近精确读数就没了</td><td>脚贴近画面底边或已掉出画面 —— 太近了。这是地面接触点法的几何限制，<strong>不是模型问题</strong></td><td>「目标距离」<strong>下面那行小字就是原因</strong>，写着「脚贴近画面底缘或已被裁（目标太近…）」就是它；此时会降级给一个带「？」的<strong>参考值</strong>（方法列写「框跨度法（横·参考）」），再近就只剩「进入减速区」的提醒。想要更近的<strong>精确</strong>读数就压低镜头 —— 见第 3 节的俯仰角对照表</td></tr>
-  <tr><td>人走近时读数停在一个数上不动（比如一直 1.9）</td><td>曾经有过的 bug（底边欠检让接触点法读到假底边，读数冻结在最近可测距离），已修复；再出现就是新问题</td><td>按第 5 节「走回」步骤复现一次并告诉我；正常行为应该是读数一路变小（参考值），直到「进入减速区」</td></tr>
-  <tr><td>读数带「？」</td><td>两种可能：<strong>近场参考值</strong>（方法列写「框跨度法（横·参考）」），或<strong>两法存疑</strong>（界面上的存疑标记）</td><td>看<strong>方法列</strong>就知道是哪种。近场参考值只用来减速/保持距离，<strong>别当精确值记录</strong>（侧身时会高估）</td></tr>
-  <tr><td>读数突然跳到很远的数，或一行小字写着「速度门控拦截」</td><td>检测抓错了框/抓丢了人。程序把这个跳变当错值<strong>拦下了</strong>（这是设计行为，不是故障）</td><td>小字里有具体数值与隐含速度；若画面里真的换了个人，连续 3 帧一致后程序会自动重新锚定（状态栏提示），最多延迟 3 帧</td></tr>
-  <tr><td>有框，但距离永远显示「不可测」，原因行写着「…不是登记类别（本项目只测行人），拒出距离」</td><td>框住的<strong>不是人</strong>（车辆 / 家具被误检）</td><td>这是<strong>有意为之</strong>：本项目只测行人，表外类别一律拒绝给数，绝不编一个尺寸去算（2026-09-27 起）。确认检测器认的是 <code>person</code> 就行</td></tr>
-  <tr><td>原因行写着「目标类别未知（标签文件未加载或类别不在高度表内）…」</td><td>「设置」页的<strong>标签文件</strong>没加载成功 —— 连"框里是不是人"都不知道，所以拒出距离</td><td>回「设置」页确认「标签文件」路径还在、内容非空，点一次 <span class="kbd">应用参数</span> 重载；加载成功后框上会写出类别名</td></tr>
-  <tr><td>「追踪目标选择」下拉里没有我想跟的人</td><td>那个人还没被<strong>主动建档</strong> —— <strong>2026-09-27 起程序不再自动建档</strong>，光让他在画面里站定不会产生档案</td><td>到「标定」页第 ③ 组<strong>「指纹建档」</strong>走一遍（见 <strong>3.5.1</strong>：填距离 → 开始建档 → 站定约 3 秒 → 听到提示音即成功）；量不出档案时先看画面里人的框有没有被裁掉上下边（被挡到腰、只露个头都量不出）</td></tr>
-  <tr><td>建档后大字写着<strong>「建档失败」</strong>并响了两声</td><td>这批采样<strong>反解出的框跨度落在合理区间之外</strong>（大字会写出实际值与区间，例如「反解身高 1.22 m 不在 1.40–2.00 m 之间」）</td><td class="fill">这是 2026-09-29 新增的<strong>过滤</strong>：可疑数据<strong>没有</strong>写进档案（存错了以后每一帧测距都会偏，而且不报错）。按大字那句话<strong>改变距离</strong>（走近或退后）再站定一次即可，界面小字全程写着「反解值 vs 要求区间」</td></tr>
-  <tr><td>建档失败、改好姿势后又站了，还要等一下？</td><td>失败后程序会先确认你<strong>真的换了位置</strong>（反解框跨度与失败时相差超过 5%）才开始重新采样 —— 否则旧姿态那几帧会和新姿态混进同一个窗口，让界面在你已经站对之后还继续喊「站定别动」</td><td>正常。界面会写「换个站位/距离（走近或退后）再站定」，照做后约 1 秒即重新开始采样</td></tr>
-  <tr><td>点「开始建档」没反应／弹窗提示要标定</td><td>「采样点距离（m）」留的是 0，而相机又还没标定 —— 程序不知道人站多远，无法反解框跨度</td><td>两条路任选：① <strong>填采样点距离</strong>（用卷尺量人站点到镜头的地面距离，填了就优先用它，可绕过标定）；② 先完成<strong>第 2 节 · 相机标定</strong>。这是保护性提醒，不是故障</td></tr>
-  <tr><td>建档时盯着屏幕却没听到提示音</td><td>采样窗口还没攒够（要 ≥12 帧且框跨度波动 CV ≤ 5%），或目标框被裁、位置飘</td><td>让目标<strong>正面全身完整入画、站稳约 3 秒</strong>别走。提示音<strong>成功一声、失败两声</strong>，且「已建档」/「建档失败」那行大字会保留约 5 秒；若一直不响，<strong>看大字下面那行小字里的 ⚠️ 原因</strong>（它写着当前卡在哪一步），或状态栏有没有报错原文</td></tr>
-  <tr><td>人明明在画面里，匹配分数却很低（认不出）</td><td>三种可能：他是<strong>没建过档的陌生人</strong>（这属正常）；他<strong>建过档但换了衣服/只是背影侧身</strong>；或<strong>门槛定得偏高</strong></td><td>界面会同时给<strong>分数和门槛</strong>（如「匹配：嵌入(余弦) 0.62 / 门槛 0.500」）：分数高于门槛却仍不认，是程序 bug；分数普遍低到门槛以下，说明<strong>门槛该调</strong> —— 门槛在 <code>reid_match_threshold</code>（现为 0.50 <strong>占位值</strong>），把「本人 / 陌生人」两组分数记下发我，我来定校准值</td></tr>
-  <tr><td>换过嵌入模型后，原来的档案不参与匹配了</td><td>档案里的嵌入出自旧模型，和新模型<strong>不同源、不可比</strong>；程序<strong>故意跳过</strong>它们比较，而不是算一个没意义的分数</td><td>这是设计行为。换嵌入模型后<strong>需要重新建档</strong>（档案里记着 <code>emb_model</code>，只有同源的嵌入才会被比对）</td></tr>
-  <tr><td>「设置」页「指纹档案管理」的三个按钮是灰的</td><td>指纹档案库还是空的（空列表点它们没有意义）</td><td>正常行为。先到「标定」页第 ③ 组建档，按钮会自动可用</td></tr>
-  <tr><td>距离明显不对（差好几倍）</td><td>方格边长和实际打印不符（默认 17.1mm 是本机打印机的实测值；换打印机、换纸型，或打印被缩放就不符）</td><td>读数和真实值差距是固定比例的话，改对「方格边长」就能修好，不用重标</td></tr>
-  <tr><td>求解时弹"标定失败"</td><td>有效帧太少或姿态太单一</td><td>重新采集，多换几个位置和角度</td></tr>
-  <tr><td>启动时弹「需要标定相机」</td><td>这台相机第一次用，或换了新相机</td><td>正常提醒，按第 2 节标一次即可；标定会按设备记住，同一台相机以后不再弹</td></tr>
-  <tr><td>「标定」页相机状态写着「未绑定设备」</td><td>标定文件是老版程序存的，没记"属于哪台相机"</td><td>确定就是这台相机就点「绑定到本设备」；不确定就重标一次（几分钟的事，比绑错强）</td></tr>
-  <tr><td>相机状态写着「分辨率不符」或「属于另一台相机」</td><td>换了相机或改了分辨率，旧内参不能再用</td><td>程序已自动停用它（不会拿错误内参硬算）；重新标定一次就恢复</td></tr>
+  <tr><td>一直显示「未检测到棋盘格」</td><td>棋盘没完整入画 / 太斜 / 光线暗 / 纸反光</td><td>挪远一点让棋盘全部入画，倾斜别超过 45°，别让灯直射纸面</td></tr>
+  <tr><td>画面上一个框都没有</td><td>模型没加载成功</td><td>看状态栏有没有「AI模型加载并初始化成功」；没有就去「设置」页检查模型 / 标签文件路径，点一次 <span class="kbd">应用参数</span></td></tr>
+  <tr><td>有框但没距离数字</td><td>相机没标定</td><td>看「标定」页 ① 组状态是不是「已标定」；不是就重做第 2 步</td></tr>
+  <tr><td>人一走近精确读数就没了</td><td>脚贴近或掉出画面下沿 —— 太近了</td><td>读数下面那行小字写着原因。此时会给带「？」的参考值；想要更近也能精确测，就压低镜头并重做第 3 步</td></tr>
+  <tr><td>读数带「？」</td><td>近场参考值，或两法结果存疑</td><td>看方法行区分。近场参考值只用来减速，别当精确值（人一侧身会高估）</td></tr>
+  <tr><td>读数突然跳到很远，小字写着「速度门控拦截」</td><td>检测抓错框 / 抓丢人，程序把这个跳变拦下了</td><td>设计行为，不是故障。画面里真换了人时，连续 3 帧一致后程序会自动重新锚定</td></tr>
+  <tr><td>距离一直「不可测」，原因写着「不是追踪目标」</td><td>认人那一关没过</td><td>做<strong>标定和验收</strong>时把追踪目标设为「（不指定）」即可 —— 验收是标定动作，与认谁无关</td></tr>
+  <tr><td>建档失败、响了两声</td><td>这批采样量出的框跨度不在合理区间（大字会写出实际值）</td><td>按大字那句走近些或退后些，再站一次。可疑数据<strong>不会</strong>写进档案</td></tr>
+  <tr><td>「追踪目标选择」下拉里没人</td><td>还没走过第 4 步的建档</td><td>到「标定」页 ③ 组走一遍建档。光让人站画面里不会产生档案</td></tr>
+  <tr><td>距离明显不对（差好几倍）</td><td>方格边长和实际打印不符</td><td>如果误差是固定比例，改对 ① 组的「方格边长」就能修好，不用重采</td></tr>
+  <tr><td>相机状态写着「分辨率不符 / 属于另一台相机」</td><td>换了相机或改了分辨率，旧内参不能再用</td><td>程序已自动停用它（不会拿错内参硬算）；重新标定一次就恢复</td></tr>
+  <tr><td>回放时曲线不动 / 一开始就画满</td><td>回放与曲线没同步</td><td>正常应该是播到哪画到哪、拖进度条立刻跟随、按停止后一起归零</td></tr>
 </table>
 
-<h2>7 · 做完以后</h2>
-<p>把第 5 节那串信息发我。我来判断：标定质量够不够、三点测距过没过 CHARTER 门槛、录制回放有没有问题。都过了，这一期的实地验收就闭环了，剩下的就是把代码合回主线的事。</p>
+<h2>下一步</h2>
+<div class="box">
+  <ul>
+    <li>想知道<strong>过没过合格线</strong>、怎么量才规范 → <span class="file">EVALUATION.md</span></li>
+    <li>想知道<strong>相机装多高、俯仰角配多少</strong> → <a href="相机怎么装.md">相机怎么装</a></li>
+    <li>想知道<strong>换相机要不要重标、内参怎么记</strong> → <a href="标定与设备.md">标定与设备</a></li>
+    <li>想知道<strong>每个功能为什么这么设计</strong> → <a href="实现细节.md">实现细节</a>、<a href="性能实测.md">性能实测</a></li>
+    <li>项目整体介绍 → <span class="file">README.md</span></li>
+  </ul>
+</div>
 
 </body>
 </html>
