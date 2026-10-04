@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 330" width="940" height="330" role="img" aria-label="三步标定：棋盘标定内参、采样点标定安装参数、指纹建档">
+  <defs>
+    <marker id="ar2" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#7c8b9c"/>
+    </marker>
+    <style>
+      .t   { font-family: "Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC",sans-serif; }
+      .s1  { fill:#eef4fa; stroke:#3f7fbf; stroke-width:1.5; }
+      .s2  { fill:#e4edf7; stroke:#3170ad; stroke-width:1.5; }
+      .s3  { fill:#dbe7f4; stroke:#245f97; stroke-width:1.5; }
+      .h   { font-size:15px; font-weight:700; fill:#1f2d3d; }
+      .bd  { font-size:12.5px; fill:#31445c; }
+      .sm  { font-size:11px; fill:#6b7a8c; }
+      .tag { font-size:12px; font-weight:700; fill:#245f97; }
+    </style>
+  </defs>
+  <rect width="940" height="330" fill="#ffffff"/>
+
+  <text class="t h" x="470" y="30" text-anchor="middle">开始用之前，只做三件事</text>
+  <text class="t sm" x="470" y="50" text-anchor="middle">三步互不依赖、按顺序做；都不需要量角器</text>
+
+  <!-- ① -->
+  <rect class="s1" x="30" y="70" width="280" height="155" rx="6"/>
+  <text class="t tag" x="50" y="96">① 棋盘标定（内参）</text>
+  <text class="t bd" x="50" y="122">打印 9×6 棋盘格，采 10+ 帧</text>
+  <text class="t sm" x="50" y="140">变换位置与倾斜角，覆盖四角</text>
+  <text class="t bd" x="50" y="164">得到 fx / fy / cx / cy + 畸变</text>
+  <text class="t sm" x="50" y="182">重投影误差 &lt; 1.0 px 可接受</text>
+  <text class="t bd" x="50" y="206">落盘　cameras.json</text>
+  <text class="t sm" x="50" y="218">按设备指纹分档，换相机自动认出</text>
+
+  <!-- ② -->
+  <rect class="s2" x="330" y="70" width="280" height="155" rx="6"/>
+  <text class="t tag" x="350" y="96">② 采样点标定（安装参数）</text>
+  <text class="t bd" x="350" y="122">卷尺量 2~3 个已知距离</text>
+  <text class="t sm" x="350" y="140">推荐 2 m / 5 m / 10 m，三点可自查</text>
+  <text class="t bd" x="350" y="164">解出安装高度 H + 俯仰角 θ</text>
+  <text class="t sm" x="350" y="182">相机装多高都不必量角度</text>
+  <text class="t bd" x="350" y="206">落盘　mount.json</text>
+  <text class="t sm" x="350" y="218">一并给出不确定度</text>
+
+  <!-- ③ -->
+  <rect class="s3" x="630" y="70" width="280" height="155" rx="6"/>
+  <text class="t tag" x="650" y="96">③ 指纹建档（记住这个人）</text>
+  <text class="t bd" x="650" y="122">让人站到画面中间，站定约 3 秒</text>
+  <text class="t sm" x="650" y="140">一声提示音 = 成功，两声 = 失败并写明原因</text>
+  <text class="t bd" x="650" y="164">得到 框跨度（纵×横）+ OSNet 嵌入</text>
+  <text class="t sm" x="650" y="182">框跨度不是身高，比真身高小约两成属正常</text>
+  <text class="t bd" x="650" y="206">落盘　person_profile.json</text>
+  <text class="t sm" x="650" y="218">可连续给多人建档</text>
+
+  <line x1="310" y1="147" x2="330" y2="147" stroke="#7c8b9c" stroke-width="1.6" marker-end="url(#ar2)"/>
+  <line x1="610" y1="147" x2="630" y2="147" stroke="#7c8b9c" stroke-width="1.6" marker-end="url(#ar2)"/>
+
+  <!-- 底部归属 -->
+  <rect x="30" y="245" width="430" height="52" rx="6" fill="#f4f7fa" stroke="#c3d0dc" stroke-width="1"/>
+  <text class="t bd" x="50" y="268">①② 随设备 —— 做一次，长期生效</text>
+  <text class="t sm" x="50" y="287">换相机重做 ①；挪机位重做 ②；两者互不影响</text>
+
+  <rect x="480" y="245" width="430" height="52" rx="6" fill="#f4f7fa" stroke="#c3d0dc" stroke-width="1"/>
+  <text class="t bd" x="500" y="268">③ 随人 —— 每换一个人做一次</text>
+  <text class="t sm" x="500" y="287">换人跟、换衣服、外形变化大时重建</text>
+</svg>

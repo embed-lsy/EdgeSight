@@ -2,6 +2,49 @@
 
 本仓库的协作约定。**每次开工先读 `CHARTER.md`，再动代码。**
 
+## 命令（改动前后各跑一遍）
+
+> 用代码块不用列表：同一句话写在列表里会被当散文读，在代码块里才是字面命令。
+
+```bash
+# ── Python 解释器：必须用这一个 ──────────────────────────────
+PY=/d/PYTHON/python.exe      # 3.13.2，带 cv2 / PySide6 / onnxruntime / numpy / pyqtgraph
+# ⚠️ 不要用 workbuddy 自带的 python，也不要用 C:\Program Files\Python39\python.exe
+#    —— 它们都没有 cv2，任何 import core.* 的脚本都会 ModuleNotFoundError
+
+# ── 跑程序 ───────────────────────────────────────────────
+$PY main_windows.py          # Windows 入口（树莓派端已冻结，本期不动）
+
+# ── 闸门检查：改完 CHARTER、或发版前跑 ──────────────────────
+$PY charter_check.py --root E:/GitRepos/EdgeSight           # 无数据只报，不算 FAIL
+$PY charter_check.py --root E:/GitRepos/EdgeSight --strict  # 无数据也算不过（发版用）
+# 另一个查的是文档结构（章节 / 未决项 / 下位文档），与上面那个互补，两个都跑：
+$PY "C:\Users\64696\.workbuddy\skills\project-charter\scripts\charter_check.py" --root E:/GitRepos/EdgeSight
+
+# ── 回归验证脚本（71 个 verify_*.py，不进仓库，在我的工作目录）──
+cd /e/WorkBuddy-Work/scripts
+PYTHONIOENCODING=utf-8 QT_QPA_PLATFORM=offscreen /d/PYTHON/python.exe verify_ranging_gate.py
+# 改动了哪个模块就跑对应的那几个；拿不准就跑这 13 个主干：
+#   verify_span_semantics verify_method_naming verify_camera_watchdog verify_person_model
+#   verify_box_bottom_semantics verify_foot_offset verify_mount_params_io verify_ranging_gate
+#   verify_refuse_distance verify_enroll_guard verify_ttc verify_calib_modes verify_wrapup
+```
+
+判据的输入是**卷尺和真人**，脚本拿不到 —— 实测数字记在 **`docs/验收实测.json`**。
+**没填就是「无数据」，绝不假装通过。**
+
+## 代码风格
+
+- **术语以 `CONTEXT.md` 为准**，代码命名必须和它一致。典型坑：是「**框跨度**」不是
+  「身高」（检测器底边框到小腿、顶边框到额头，实测比真身高小约两成）；
+  方法名是「**接触点法**」「**框跨度法（纵/横）**」，不是「高度法 / 像素法」。
+- **内部键与显示名分离**：字典键、枚举名、profile_id 是内部标识，**只改显示层，
+  不动内部键**；界面上不许直接显示内部标识（详见 skill `ui-display-name-leak`）。
+- **Git Bash 下 bash 命令一律以** `export PATH="/d/Git/Git/usr/bin:$PATH";` **开头**，
+  否则 coreutils 全废。
+- 数值类功能（测距、TTC、线程数、分辨率、耗时）**必须实测出数字**再下结论，
+  估算只能当假设写明。
+
 ## 开工前必读（按顺序）
 
 1. **`CHARTER.md`** —— 项目定位。范围内的、明确不做的、硬约束，全在这里。
@@ -68,26 +111,11 @@
   改完先把**改动摆出来给用户过目**，用户看过、说了「提交」才提交。
   AI **不主动 commit**、不「边改边提交」、不「先提交再补报告」。
 - 定位变更单独成 commit，message 前缀 `charter:`，并注明改动来源。
--   改完**手动跑一次结构校验**（只读，不挂 git hook）：
+-   改完**手动跑一次结构校验**（只读，不挂 git hook）—— 命令见开头「命令」一节。
+    两个检查器都要跑：skill 那个管**文档结构**（章节 / 未决项 / 下位文档），
+    仓库里这个管**五条门槛判据有没有真测过**。
 
-  ```bash
-  python "C:\Users\64696\.workbuddy\skills\project-charter\scripts\charter_check.py" --root E:/GitRepos/EdgeSight
-  ```
-
-  合格线：**FAIL 0 / WARN 0**，且 `CHARTER.md` ≤ 120 行（超了说明它正在被当规格书用）。
-
-  上面那个是**文档结构**检查器（章节、未决项、下位文档）。
-  仓库里另有一个 **`charter_check.py`（2026-10-02 补齐）**，查的是 CHARTER
-  「成功判据」里的**五条门槛**能不能机械判定：
-
-  ```bash
-  python charter_check.py --root E:/GitRepos/EdgeSight            # 无数据只报不算 FAIL
-  python charter_check.py --root E:/GitRepos/EdgeSight --strict   # 无数据也算不过（发版前用）
-  ```
-
-  判据的输入是**卷尺和真人**，脚本拿不到 —— 实测数字记在 **`docs/验收实测.json`**
-  （分点实测记录表，已备好空模板）。**没填就是「无数据」，绝不假装通过。**
-  两个检查器都要跑：前者管「定位文档有没有被当规格书用」，后者管「门槛判据有没有真测过」。
+    合格线：**FAIL 0 / WARN 0**，且 `CHARTER.md` ≤ 120 行（超了说明它正在被当规格书用）。
 
 ## ⚠️ 远端是底线（2026-09-22 用户明确要求）
 
@@ -133,11 +161,25 @@
 - 新术语 → 当场写进 `CONTEXT.md`
 - 难以逆转 + 不讲会困惑 + 有真实取舍 的决策 → 写一条 ADR，三条全中才写
 
-## 硬规则
+## Never 清单（高压线汇总）
+
+**先问再做**（Ask first）：
+
+- 任何超出 `CHARTER.md`「范围内的」的改动 —— 停下说明越界在哪、给推荐结论、说明代价。
+- 大范围跨模块重构、新增依赖、破坏性数据/迁移操作。
+- `git push` —— **远端是底线**，只有用户单独、明确授权时才推送。
+
+**绝不做**（Never）：
 
 - 不写业务代码前先有 `CHARTER.md`。
 - 越界就停，不许默默扩大范围。
 - 不把笔记、缓存、脚本草稿写进本仓库。
-- 不许假装完成。
-- **执行环境**：Windows + Git Bash。bash 命令以 `export PATH="/d/Git/Git/usr/bin:$PATH";` 开头；
-  禁止全量递归遍历大目录（会超时并变成僵尸后台任务），优先用 Read / PowerShell。
+- 不许假装完成 —— 没验证过的东西不许说已完成；闸门「无数据」不许当 PASS 报。
+- **不在 `main` 上改代码**，一切功能改动走独立分支。
+- 不把内部标识（字典键 / 枚举名 / `person-1-1790996823` 这类 ID）直接显示到界面上。
+- 不主动 commit —— 「改动就绪但未提交」是默认且唯一正确的交出状态。
+- 不把 git 写操作串成一条命令（中断会留下半完成状态，比直接失败更糟）。
+- 不使用破坏性 git 操作（除非用户明确要求）。
+
+**执行环境**：Windows + Git Bash。bash 命令以 `export PATH="/d/Git/Git/usr/bin:$PATH";` 开头；
+禁止全量递归遍历大目录（会超时并变成僵尸后台任务），优先用 Read / PowerShell。

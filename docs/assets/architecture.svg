@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 500" width="940" height="500" role="img" aria-label="EdgeSight 主链路：采集、检测后分几何测距与认人两支，汇合出 TTC 与输出">
+  <defs>
+    <marker id="ar" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#7c8b9c"/>
+    </marker>
+    <style>
+      .t   { font-family: "Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC",sans-serif; }
+      .box { fill:#eef4fa; stroke:#3f7fbf; stroke-width:1.5; }
+      .g   { fill:#eaf6ee; stroke:#4a9160; stroke-width:1.5; }
+      .p   { fill:#f2ecfa; stroke:#7a5cb0; stroke-width:1.5; }
+      .o   { fill:#fdf1e3; stroke:#c07a2a; stroke-width:1.5; }
+      .h1  { font-size:15px; font-weight:700; fill:#1f2d3d; }
+      .h2  { font-size:13px; font-weight:700; fill:#1f2d3d; }
+      .bd  { font-size:12.5px; fill:#31445c; }
+      .sm  { font-size:11px; fill:#6b7a8c; }
+    </style>
+  </defs>
+  <rect width="940" height="500" fill="#ffffff"/>
+
+  <!-- 主干 -->
+  <rect class="box" x="330" y="24"  width="280" height="48" rx="6"/>
+  <text class="t h1" x="470" y="45" text-anchor="middle">摄像头采集</text>
+  <text class="t sm" x="470" y="62" text-anchor="middle">单目 · 640×480 · 无雷达无独显</text>
+
+  <rect class="box" x="330" y="104" width="280" height="48" rx="6"/>
+  <text class="t h1" x="470" y="125" text-anchor="middle">行人检测</text>
+  <text class="t sm" x="470" y="142" text-anchor="middle">YOLOv8n ONNX · CPU 推理</text>
+
+  <line x1="470" y1="72"  x2="470" y2="104" stroke="#7c8b9c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="440" y1="152" x2="250" y2="180" stroke="#7c8b9c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="500" y1="152" x2="690" y2="180" stroke="#7c8b9c" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- 左支：几何测距 -->
+  <rect class="g" x="40" y="180" width="420" height="140" rx="6"/>
+  <text class="t h2" x="60" y="204">几何测距（出米制距离）</text>
+  <text class="t bd" x="60" y="228">接触点法</text><text class="t sm" x="150" y="228">只用相机 H / θ，不依赖目标尺寸</text>
+  <text class="t bd" x="60" y="250">框跨度法（纵）</text><text class="t sm" x="150" y="250">用该人档案里量出的框跨度</text>
+  <text class="t bd" x="60" y="272">两法互检</text><text class="t sm" x="150" y="272">差异 &gt; 15% 标「存疑」，两个数都给</text>
+  <text class="t bd" x="60" y="294">距离去噪</text><text class="t sm" x="150" y="294">中值滤波 + One Euro 自适应低通</text>
+  <text class="t sm" x="60" y="313">脚出画 → 框跨度法（横）参考值（带「？」）→ 再近只给定性警报</text>
+
+  <!-- 右支：认人 -->
+  <rect class="p" x="500" y="180" width="400" height="140" rx="6"/>
+  <text class="t h2" x="520" y="204">认人（只跟一个人）</text>
+  <text class="t bd" x="520" y="228">OSNet 嵌入</text><text class="t sm" x="620" y="228">512 维外观指纹</text>
+  <text class="t bd" x="520" y="250">框跨度</text><text class="t sm" x="620" y="250">纵 × 横（身体比例）</text>
+  <text class="t bd" x="520" y="272">匹配</text><text class="t sm" x="620" y="272">余弦相似度 ≥ 0.50</text>
+  <text class="t bd" x="520" y="294">身份门</text><text class="t sm" x="620" y="294">认错人 = 不出数，不套别人的距离</text>
+  <text class="t sm" x="520" y="313">非行人类别一律拒绝出距离</text>
+
+  <line x1="250" y1="320" x2="440" y2="352" stroke="#7c8b9c" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="690" y1="320" x2="500" y2="352" stroke="#7c8b9c" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <rect class="o" x="270" y="352" width="400" height="48" rx="6"/>
+  <text class="t h1" x="470" y="373" text-anchor="middle">TTC 碰撞预警</text>
+  <text class="t sm" x="470" y="390" text-anchor="middle">提示 ≤4 s　预警 ≤2.5 s　危险 ≤1.2 s</text>
+
+  <line x1="470" y1="400" x2="470" y2="424" stroke="#7c8b9c" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <rect class="o" x="270" y="424" width="400" height="48" rx="6"/>
+  <text class="t h1" x="470" y="445" text-anchor="middle">输出</text>
+  <text class="t sm" x="470" y="462" text-anchor="middle">距离 / 方位 / TTC → 界面 · 录制双轨（视频轨 + 数据轨）</text>
+</svg>

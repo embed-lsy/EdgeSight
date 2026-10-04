@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     viewBox="0 0 940 640" width="940" height="640" role="img"
+     aria-label="EdgeSight 监视页界面示意图：左侧原始图像与处理后的图像，右侧目标位置、模型参数微调与系统性能">
+  <defs>
+    <style>
+      .t   { font-family: "Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC",sans-serif; }
+      .win { fill:#f4f7fa; stroke:#8d9bad; stroke-width:1.2; }
+      .tbt { font-size:12.5px; fill:#9aa7b8; }
+      .tba { font-size:12.5px; font-weight:700; fill:#1f2d3d; }
+      .grp { fill:#fbfcfe; stroke:#a9b6c6; stroke-width:1.1; }
+      .gt  { font-size:12px; font-weight:700; fill:#2b3a4d; }
+      .lbl { font-size:11.5px; fill:#5a6a7d; }
+      .val { font-size:12px; font-weight:700; fill:#1f2d3d; }
+      .big { font-size:19px; font-weight:700; fill:#2f7d4f; }
+      .sm  { font-size:10.5px; fill:#7b8898; }
+      .scr { fill:#eef2f6; stroke:#b6c2d0; stroke-width:1; }
+    </style>
+
+    <!-- 合成画面：中性场景 + 人物剪影。刻意抽象化 —— 画面里没有任何真实个体。 -->
+    <g id="camScene">
+      <rect width="416" height="240" fill="#eef2f6"/>
+      <rect width="416" height="95" fill="#e7ecf2"/>
+      <rect y="95" width="416" height="145" fill="#dde4ec"/>
+      <line x1="0" y1="95" x2="416" y2="95" stroke="#b9c4d0" stroke-width="1"/>
+      <line x1="208" y1="95" x2="14"  y2="240" stroke="#c3cdd9" stroke-width="1"/>
+      <line x1="208" y1="95" x2="402" y2="240" stroke="#c3cdd9" stroke-width="1"/>
+      <g stroke="#c9d3de" stroke-width="1">
+        <line x1="0" y1="200" x2="416" y2="200"/>
+        <line x1="0" y1="160" x2="416" y2="160"/>
+        <line x1="0" y1="132" x2="416" y2="132"/>
+        <line x1="0" y1="114" x2="416" y2="114"/>
+        <line x1="0" y1="101" x2="416" y2="101"/>
+      </g>
+      <g class="t" font-size="9" fill="#8b97a5">
+        <text x="388" y="197">2 m</text>
+        <text x="388" y="157">3 m</text>
+        <text x="388" y="129">4 m</text>
+        <text x="388" y="111">5 m</text>
+      </g>
+      <g fill="#46536b">
+        <circle cx="208" cy="68" r="7"/>
+        <path d="M194,76 q14,-6 28,0 l3,30 -7,0 -1,26 -6,0 -1,-26 -7,0 -1,26 -6,0 -1,-26 -7,0 z"/>
+      </g>
+    </g>
+  </defs>
+
+  <rect width="940" height="640" fill="#ffffff"/>
+
+  <!-- 窗口外框 + 标题栏 -->
+  <rect class="win" x="8" y="8" width="924" height="624" rx="6"/>
+  <path fill="#3a4050" d="M8,14 a6,6 0 0 1 6,-6 h912 a6,6 0 0 1 6,6 v24 h-924 z"/>
+  <text class="t" x="26" y="30" font-size="12.5" font-weight="700" fill="#dfe6ef">EdgeSight · 单目视觉感知栈</text>
+  <g fill="#5c6879">
+    <circle cx="888" cy="26" r="4"/><circle cx="903" cy="26" r="4"/><circle cx="918" cy="26" r="4"/>
+  </g>
+
+  <!-- 页签 -->
+  <rect x="20" y="46" width="86" height="26" rx="4" fill="#ffffff" stroke="#a9b6c6"/>
+  <text class="t tba" x="63" y="63" text-anchor="middle">监视</text>
+  <g class="t tbt">
+    <text x="132" y="63">深度分析</text>
+    <text x="206" y="63">设置</text>
+    <text x="254" y="63">录制回放</text>
+    <text x="326" y="63">标定</text>
+  </g>
+  <line x1="20" y1="72" x2="920" y2="72" stroke="#c3cdd9" stroke-width="1"/>
+
+  <!-- 左：原始图像 -->
+  <rect class="grp" x="20" y="82" width="440" height="272" rx="4"/>
+  <rect x="30" y="74" width="72" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="86">原始图像</text>
+  <rect class="scr" x="32" y="94" width="416" height="240"/>
+  <use href="#camScene" xlink:href="#camScene" x="32" y="94"/>
+  <text class="t" x="40" y="326" font-size="10" fill="#8b97a5">示意图 · 合成画面</text>
+
+  <!-- 左：处理后的图像（带检测框与测距） -->
+  <rect class="grp" x="20" y="362" width="440" height="272" rx="4"/>
+  <rect x="30" y="354" width="86" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="366">处理后的图像</text>
+  <rect class="scr" x="32" y="374" width="416" height="240"/>
+  <use href="#camScene" xlink:href="#camScene" x="32" y="374"/>
+  <g transform="translate(32,374)">
+    <rect x="188" y="54" width="40" height="82" fill="none" stroke="#4a9160" stroke-width="2.4"/>
+    <rect x="188" y="36" width="70" height="17" rx="2" fill="#4a9160"/>
+    <text class="t" x="223" y="48" font-size="10.5" fill="#ffffff" text-anchor="middle">person 0.94</text>
+    <g stroke="#c07a2a" stroke-width="1.6">
+      <line x1="200" y1="132" x2="216" y2="132"/>
+      <line x1="208" y1="124" x2="208" y2="140"/>
+    </g>
+    <rect x="177" y="146" width="62" height="19" rx="3" fill="#fdf1e3" stroke="#c07a2a"/>
+    <text class="t" x="208" y="159" font-size="11.5" font-weight="700" fill="#8a4f12"
+          text-anchor="middle">4.02 m</text>
+    <text class="t" x="8" y="232" font-size="10" fill="#8b97a5">示意图 · 合成画面</text>
+  </g>
+
+  <!-- 右：目标位置 -->
+  <rect class="grp" x="470" y="82" width="450" height="218" rx="4"/>
+  <rect x="480" y="74" width="72" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="484" y="86">目标位置</text>
+  <g class="t">
+    <text class="lbl" x="492" y="114">框中心 X：</text><text class="val" x="700" y="114">320</text>
+    <text class="lbl" x="492" y="142">框中心 Y：</text><text class="val" x="700" y="142">392</text>
+    <text class="lbl" x="492" y="170">检测置可信度：</text><text class="val" x="700" y="170">0.94</text>
+    <text class="lbl" x="492" y="198">目标类别：</text><text class="val" x="700" y="198">person</text>
+    <line x1="486" y1="212" x2="904" y2="212" stroke="#dde3ea" stroke-width="1"/>
+    <text class="lbl" x="492" y="244">目标距离：</text><text class="big" x="700" y="246">4.02 m</text>
+    <text class="lbl" x="492" y="272">碰撞预警：</text><text class="val" x="700" y="272">--</text>
+  </g>
+
+  <!-- 右：模型参数实时微调 -->
+  <rect class="grp" x="470" y="312" width="450" height="98" rx="4"/>
+  <rect x="480" y="304" width="126" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="484" y="316">模型参数实时微调</text>
+  <g class="t">
+    <text class="lbl" x="492" y="344">置信度阈值：</text>
+    <rect x="580" y="338" width="250" height="6" rx="3" fill="#dbe3ec"/>
+    <rect x="580" y="338" width="100" height="6" rx="3" fill="#3f7fbf"/>
+    <circle cx="680" cy="341" r="7" fill="#ffffff" stroke="#3f7fbf" stroke-width="2"/>
+    <text class="val" x="848" y="344">0.40</text>
+
+    <text class="lbl" x="492" y="378">NMS 阈值：</text>
+    <rect x="580" y="372" width="250" height="6" rx="3" fill="#dbe3ec"/>
+    <rect x="580" y="372" width="112" height="6" rx="3" fill="#3f7fbf"/>
+    <circle cx="692" cy="375" r="7" fill="#ffffff" stroke="#3f7fbf" stroke-width="2"/>
+    <text class="val" x="848" y="378">0.45</text>
+  </g>
+
+  <!-- 右：系统性能 -->
+  <rect class="grp" x="470" y="422" width="450" height="88" rx="4"/>
+  <rect x="480" y="414" width="72" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="484" y="426">系统性能</text>
+  <g class="t">
+    <text class="lbl" x="492" y="456">推理 FPS：</text><text class="val" x="700" y="456">19.9</text>
+    <text class="lbl" x="492" y="486">画面 FPS：</text><text class="val" x="700" y="486">30</text>
+  </g>
+
+  <!-- 右：说明 -->
+  <rect x="470" y="522" width="450" height="92" rx="4" fill="#f2f6fa" stroke="#cfd9e4"
+        stroke-dasharray="4 3"/>
+  <text class="t sm" x="486" y="546">示意图：页签名、分组标题、控件文案均取自</text>
+  <text class="t sm" x="486" y="564">ui/EdgeSightMain.ui；画面区为合成场景（人物</text>
+  <text class="t sm" x="486" y="582">以剪影表示），非真实拍摄，不呈现任何真实</text>
+  <text class="t sm" x="486" y="600">个体或环境。读数 4.02 m 取自实测 4 m 点。</text>
+</svg>

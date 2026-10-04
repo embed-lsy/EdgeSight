@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 340" width="1040" height="340" role="img" aria-label="测距降级阶梯：精确值、参考值、定性警报、不可测">
+  <defs>
+    <marker id="ar3" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#7c8b9c"/>
+    </marker>
+    <style>
+      .t   { font-family: "Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC",sans-serif; }
+      .a   { fill:#eaf6ee; stroke:#4a9160; stroke-width:1.5; }
+      .b   { fill:#fdf6e3; stroke:#b58a2a; stroke-width:1.5; }
+      .c   { fill:#fdece0; stroke:#c06a2a; stroke-width:1.5; }
+      .d   { fill:#f0f3f6; stroke:#8593a3; stroke-width:1.5; stroke-dasharray:5 3; }
+      .h   { font-size:15px; font-weight:700; fill:#1f2d3d; }
+      .bd  { font-size:12.5px; fill:#31445c; }
+      .sm  { font-size:11px; fill:#6b7a8c; }
+      .ax  { font-size:12px; fill:#6b7a8c; }
+    </style>
+  </defs>
+  <rect width="1040" height="340" fill="#ffffff"/>
+
+  <text class="t ax" x="25" y="28">远</text>
+  <line x1="50" y1="24" x2="745" y2="24" stroke="#7c8b9c" stroke-width="1.6" marker-end="url(#ar3)"/>
+  <text class="t ax" x="755" y="28">近（目标走近）</text>
+
+  <!-- ① 精确值 -->
+  <rect class="a" x="25" y="50" width="235" height="180" rx="6"/>
+  <text class="t h" x="45" y="78">① 精确值</text>
+  <text class="t bd" x="45" y="106">接触点法 + 框跨度法（纵）</text>
+  <text class="t sm" x="45" y="126">两法都有解，互为交叉验证</text>
+  <text class="t bd" x="45" y="152">一致 → 直接出数</text>
+  <text class="t bd" x="45" y="174">不一致 → 标「存疑」</text>
+  <text class="t sm" x="45" y="194">差异 &gt; 15% 触发，两个数都给</text>
+  <text class="t sm" x="45" y="216">让你看见分歧，不替你选一个</text>
+
+  <!-- ② 参考值 -->
+  <rect class="b" x="280" y="100" width="235" height="130" rx="6"/>
+  <text class="t h" x="300" y="128">② 参考值（带「？」）</text>
+  <text class="t bd" x="300" y="156">框跨度法（横）</text>
+  <text class="t sm" x="300" y="176">Z = fx × 框跨度·横 / 框宽</text>
+  <text class="t bd" x="300" y="202">脚出画时启用</text>
+  <text class="t sm" x="300" y="222">底边进画面底边 12 px 带内，带滞回</text>
+
+  <!-- ③ 定性警报 -->
+  <rect class="c" x="535" y="150" width="235" height="80" rx="6"/>
+  <text class="t h" x="555" y="178">③ 定性警报</text>
+  <text class="t bd" x="555" y="202">「进入减速 / 制动区」</text>
+  <text class="t sm" x="555" y="222">框宽占满画面 85% 触发 · 不给数字</text>
+
+  <!-- ④ 不可测（与距离无关） -->
+  <rect class="d" x="790" y="50" width="235" height="180" rx="6"/>
+  <text class="t h" x="810" y="78">不可测（写明原因）</text>
+  <text class="t bd" x="810" y="108">认错人 / 不是追踪目标</text>
+  <text class="t sm" x="810" y="128">套别人身上的数字比不可测更坏</text>
+  <text class="t bd" x="810" y="154">非行人类别</text>
+  <text class="t sm" x="810" y="174">类别白名单外一律拒绝出距离</text>
+  <text class="t bd" x="810" y="200">脚被裁 / 框不完整</text>
+  <text class="t sm" x="810" y="220">原因写进读数下面那行小字</text>
+
+  <text class="t ax" x="25"  y="262">两法都有解</text>
+  <text class="t ax" x="280" y="262">脚出画</text>
+  <text class="t ax" x="535" y="262">太近，框占满</text>
+  <text class="t ax" x="790" y="262">与距离无关 —— 身份 / 类别不成立</text>
+
+  <rect x="25" y="284" width="1000" height="40" rx="6" fill="#f4f7fa" stroke="#c3d0dc" stroke-width="1"/>
+  <text class="t bd" x="45" y="309">核心原则：宁可报「不可测」，也绝不给一个伪装成精确值的兜底数字 —— 看不出错的错值，比没有值更危险。</text>
+</svg>

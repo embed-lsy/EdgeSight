@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 470" width="940" height="470" role="img"
+     aria-label="测距误差随相机安装高度变化的曲线：装得越高越准，2 米、5 米、10 米三条曲线">
+  <defs>
+    <style>
+      .t   { font-family: "Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC",sans-serif; }
+      .ttl { font-size:14px; font-weight:700; fill:#1f2d3d; }
+      .sub { font-size:11px; fill:#6b7a8d; }
+      .ax  { font-size:10.5px; fill:#5a6a7d; }
+      .tk  { font-size:9.5px; fill:#8b97a5; }
+      .lg  { font-size:11px; font-weight:700; }
+      .mark{ font-size:10px; font-weight:700; }
+      .note{ font-size:10.5px; fill:#7b8898; }
+      .pl  { fill:#fcfdfe; stroke:#c9d3de; stroke-width:1; }
+      .gd  { stroke:#e9eef4; stroke-width:1; }
+      .axl { stroke:#b6c2d0; stroke-width:1.2; }
+    </style>
+  </defs>
+
+  <rect width="940" height="470" fill="#ffffff"/>
+  <text class="t ttl" x="20" y="28">测距误差随相机安装高度 H 的变化</text>
+  <text class="t sub" x="20" y="46">本机内参（640×480，fy≈783.7）· 自标定不确定度 σθ≈0.15° · 三条曲线分别是 2 m / 5 m / 10 m 处的相对误差</text>
+
+  <!-- plot 区 -->
+  <rect class="pl" x="70" y="60" width="830" height="320"/>
+  <g class="gd">
+    <line x1="70" y1="100" x2="900" y2="100"/><line x1="70" y1="140" x2="900" y2="140"/>
+    <line x1="70" y1="180" x2="900" y2="180"/><line x1="70" y1="220" x2="900" y2="220"/>
+    <line x1="70" y1="260" x2="900" y2="260"/><line x1="70" y1="300" x2="900" y2="300"/>
+    <line x1="70" y1="340" x2="900" y2="340"/>
+  </g>
+  <g class="axl"><line x1="70" y1="60" x2="70" y2="380"/><line x1="70" y1="380" x2="900" y2="380"/></g>
+
+  <!-- 纵轴刻度 -->
+  <g class="t tk" text-anchor="end">
+    <text x="62" y="384">0</text><text x="62" y="304">4%</text><text x="62" y="224">8%</text>
+    <text x="62" y="144">12%</text><text x="62" y="64">16%</text>
+  </g>
+  <!-- 横轴刻度 -->
+  <g class="t tk" text-anchor="middle">
+    <text x="70" y="398">0.2 m</text><text x="208" y="398">0.5 m</text><text x="439" y="398">1.0 m</text>
+    <text x="669" y="398">1.5 m</text><text x="900" y="398">2.0 m</text>
+  </g>
+  <text class="t ax" x="485" y="422" text-anchor="middle">相机安装高度 H（米）</text>
+  <text class="t ax" x="20" y="200" transform="rotate(-90 20 200)" text-anchor="middle">测距相对误差</text>
+
+  <!-- 临界线 -->
+  <line x1="439" y1="60" x2="439" y2="380" stroke="#4a9160" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text class="t mark" x="443" y="96" fill="#2f7d4f">推荐 1.00 m</text>
+  <line x1="475" y1="60" x2="475" y2="380" stroke="#c07a2a" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text class="t mark" x="479" y="128" fill="#a06a24">1.08 m：近处与远场不可兼得</text>
+  <line x1="586" y1="60" x2="586" y2="380" stroke="#c07a2a" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text class="t mark" x="590" y="158" fill="#a06a24">1.32 m：地平线出画</text>
+  <line x1="857" y1="60" x2="857" y2="380" stroke="#b3452f" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text class="t mark" x="853" y="188" fill="#b3452f" text-anchor="end">1.91 m：无解</text>
+
+  <!-- 三条曲线 -->
+  <polyline fill="none" stroke="#4a9160" stroke-width="2.4"
+    points="70,264 116,302 162,322 208,334 254,340 300,346 346,350 392,352 439,356 485,358 531,358 577,360 623,362 669,362 715,362 761,364 807,364 853,364"/>
+  <polyline fill="none" stroke="#3f7fbf" stroke-width="2.4"
+    points="70,204 116,262 162,292 208,308 254,320 300,328 346,336 392,340 439,344 485,346 531,350 577,352 623,354 669,356 715,356 761,358 807,358 853,360"/>
+  <polyline fill="none" stroke="#b3452f" stroke-width="2.4"
+    points="70,72 116,174 162,226 208,256 254,278 300,292 346,302 392,312 439,318 485,324 531,328 577,332 623,336 669,338 715,342 761,344 807,346 853,348"/>
+
+  <!-- 图例 -->
+  <g transform="translate(770,70)">
+    <rect x="0" y="0" width="126" height="62" rx="4" fill="#ffffff" stroke="#dbe3ec"/>
+    <line x1="10" y1="16" x2="34" y2="16" stroke="#4a9160" stroke-width="2.4"/>
+    <text class="t lg" x="42" y="20" fill="#4a9160">2 m</text>
+    <line x1="10" y1="34" x2="34" y2="34" stroke="#3f7fbf" stroke-width="2.4"/>
+    <text class="t lg" x="42" y="38" fill="#3f7fbf">5 m</text>
+    <line x1="10" y1="52" x2="34" y2="52" stroke="#b3452f" stroke-width="2.4"/>
+    <text class="t lg" x="42" y="56" fill="#b3452f">10 m</text>
+  </g>
+
+  <text class="t note" x="20" y="444">读图：三条线都是「越装高越准」，而且越远的点越吃高度 —— 10 m 处从 0.3 m 装到 1.0 m，误差从 10.3% 降到 3.1%。</text>
+  <text class="t note" x="20" y="460">所以「装高」是唯一能同时改善全距离的杠杆；代价是超过 1.08 m 后，近处的脚与远处的上半身只能保一个。</text>
+</svg>

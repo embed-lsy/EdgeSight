@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 648" width="940" height="648" role="img"
+     aria-label="EdgeSight 录制回放页界面示意图：录制、回放分析、测距曲线">
+  <defs>
+    <style>
+      .t   { font-family: "Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC",sans-serif; }
+      .win { fill:#f4f7fa; stroke:#8d9bad; stroke-width:1.2; }
+      .tbt { font-size:12.5px; fill:#9aa7b8; }
+      .tba { font-size:12.5px; font-weight:700; fill:#1f2d3d; }
+      .grp { fill:#fbfcfe; stroke:#a9b6c6; stroke-width:1.1; }
+      .gt  { font-size:12px; font-weight:700; fill:#2b3a4d; }
+      .lbl { font-size:11.5px; fill:#5a6a7d; }
+      .val { font-size:12px; font-weight:700; fill:#1f2d3d; }
+      .btn { font-size:11.5px; fill:#2b3a4d; }
+      .sm  { font-size:10.5px; fill:#7b8898; }
+      .hint{ font-size:10px; fill:#7b8898; }
+      .box { fill:#ffffff; stroke:#b6c2d0; stroke-width:1; }
+      .pl  { fill:#fcfdfe; stroke:#c9d3de; stroke-width:1; }
+      .gd  { stroke:#e9eef4; stroke-width:1; }
+      .ax  { font-size:8.5px; fill:#9aa7b8; }
+    </style>
+  </defs>
+
+  <rect width="940" height="648" fill="#ffffff"/>
+
+  <rect class="win" x="8" y="8" width="924" height="584" rx="6"/>
+  <path fill="#3a4050" d="M8,14 a6,6 0 0 1 6,-6 h912 a6,6 0 0 1 6,6 v24 h-924 z"/>
+  <text class="t" x="26" y="30" font-size="12.5" font-weight="700" fill="#dfe6ef">EdgeSight · 单目视觉感知栈</text>
+  <g fill="#5c6879">
+    <circle cx="888" cy="26" r="4"/><circle cx="903" cy="26" r="4"/><circle cx="918" cy="26" r="4"/>
+  </g>
+
+  <g class="t tbt">
+    <text x="34" y="63">监视</text>
+    <text x="142" y="63">深度分析</text>
+    <text x="232" y="63">设置</text>
+    <text x="506" y="63">标定</text>
+  </g>
+  <rect x="270" y="46" width="104" height="26" rx="4" fill="#ffffff" stroke="#a9b6c6"/>
+  <text class="t tba" x="322" y="63" text-anchor="middle">录制回放</text>
+  <line x1="20" y1="72" x2="920" y2="72" stroke="#c3cdd9" stroke-width="1"/>
+
+  <!-- 录制 -->
+  <rect class="grp" x="20" y="82" width="900" height="96" rx="4"/>
+  <rect x="30" y="74" width="48" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="86">录制</text>
+  <g class="t">
+    <rect class="box" x="32" y="100" width="88" height="24" rx="4"/>
+    <text class="btn" x="76" y="116" text-anchor="middle">开始录制</text>
+    <text class="val" x="136" y="116">录制中 · 00:12</text>
+    <text class="hint" x="32" y="150">画面写入视频轨（.avi），检测与测距结果写入数据轨（.jsonl），两轨分开落盘；录制期间不阻塞主链路。</text>
+  </g>
+
+  <!-- 回放分析 -->
+  <rect class="grp" x="20" y="190" width="900" height="96" rx="4"/>
+  <rect x="30" y="182" width="72" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="194">回放分析</text>
+  <g class="t">
+    <rect class="box" x="32" y="208" width="88" height="24" rx="4"/>
+    <text class="btn" x="76" y="224" text-anchor="middle">选择录制</text>
+    <rect class="box" x="130" y="208" width="68" height="24" rx="4"/>
+    <text class="btn" x="164" y="224" text-anchor="middle">播放</text>
+    <rect class="box" x="208" y="208" width="68" height="24" rx="4"/>
+    <text class="btn" x="242" y="224" text-anchor="middle">停止</text>
+    <rect x="288" y="220" width="452" height="6" rx="3" fill="#dbe3ec"/>
+    <rect x="288" y="220" width="151" height="6" rx="3" fill="#3f7fbf"/>
+    <circle cx="439" cy="223" r="7" fill="#ffffff" stroke="#3f7fbf" stroke-width="2"/>
+    <text class="val" x="758" y="224">1234 / 3680</text>
+    <text class="hint" x="32" y="258">视频轨与数据轨同步回放；拖动进度条可跳帧，曲线随播放进度增长。</text>
+  </g>
+
+  <!-- 测距曲线 -->
+  <rect class="grp" x="20" y="298" width="900" height="250" rx="4"/>
+  <rect x="30" y="290" width="148" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="302">测距曲线（录制/回放）</text>
+  <g transform="translate(32,318)">
+    <rect class="pl" width="876" height="210"/>
+    <g class="gd"><line x1="0" y1="42" x2="876" y2="42"/><line x1="0" y1="84" x2="876" y2="84"/>
+      <line x1="0" y1="126" x2="876" y2="126"/><line x1="0" y1="168" x2="876" y2="168"/></g>
+    <g class="t ax"><text x="6" y="26">6 m</text><text x="6" y="86">4 m</text><text x="6" y="146">2 m</text></g>
+    <text class="t ax" x="852" y="202">帧 →</text>
+    <polyline fill="none" stroke="#8b97a5" stroke-width="2.2" points="0,150 146,120 292,90"/>
+    <polyline fill="none" stroke="#8b97a5" stroke-width="2.2" points="292,90 438,60"/>
+    <polyline fill="none" stroke="#d8a12a" stroke-width="2.2" points="438,60 584,90"/>
+    <polyline fill="none" stroke="#c07a2a" stroke-width="2.2" points="584,90 730,120"/>
+    <polyline fill="none" stroke="#b3452f" stroke-width="2.2" points="730,120 876,150"/>
+  </g>
+  <g class="t hint" transform="translate(32,540)">
+    <rect x="0" y="-8" width="18" height="4" rx="2" fill="#8b97a5"/><text x="24" y="0">未出数 / 远离</text>
+    <rect x="130" y="-8" width="18" height="4" rx="2" fill="#d8a12a"/><text x="154" y="0">提示</text>
+    <rect x="210" y="-8" width="18" height="4" rx="2" fill="#c07a2a"/><text x="234" y="0">预警</text>
+    <rect x="290" y="-8" width="18" height="4" rx="2" fill="#b3452f"/><text x="314" y="0">危险（曲线按 TTC 分级着色）</text>
+  </g>
+
+  <text class="t val" x="20" y="576">回放 3680 帧 · 可测距帧占比 92.7% · 推理 FPS 中位 19.9</text>
+
+  <text class="t sm" x="20" y="612">示意图：分组标题与控件文案取自 ui/EdgeSightMain.ui；曲线为示意波形，形状对应实测录像的平台段序列（2→5→2 m）。</text>
+  <text class="t sm" x="20" y="630">帧数与占比为示例值，FPS 19.9 为实测中位数；本页不含真实拍摄画面。</text>
+</svg>

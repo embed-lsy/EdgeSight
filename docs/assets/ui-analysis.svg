@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 668" width="940" height="668" role="img"
+     aria-label="EdgeSight 深度分析页界面示意图：TTC 分析、目标距离分析、置信度分析、系统性能分析四块曲线区">
+  <defs>
+    <style>
+      .t   { font-family: "Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC",sans-serif; }
+      .win { fill:#f4f7fa; stroke:#8d9bad; stroke-width:1.2; }
+      .tbt { font-size:12.5px; fill:#9aa7b8; }
+      .tba { font-size:12.5px; font-weight:700; fill:#1f2d3d; }
+      .grp { fill:#fbfcfe; stroke:#a9b6c6; stroke-width:1.1; }
+      .gt  { font-size:12px; font-weight:700; fill:#2b3a4d; }
+      .lbl { font-size:11.5px; fill:#5a6a7d; }
+      .val { font-size:12px; font-weight:700; fill:#1f2d3d; }
+      .sm  { font-size:10.5px; fill:#7b8898; }
+      .ax  { font-size:8.5px; fill:#9aa7b8; }
+      .pl  { fill:#fcfdfe; stroke:#c9d3de; stroke-width:1; }
+      .gd  { stroke:#e9eef4; stroke-width:1; }
+    </style>
+  </defs>
+
+  <rect width="940" height="668" fill="#ffffff"/>
+
+  <!-- 窗口外框 + 标题栏 -->
+  <rect class="win" x="8" y="8" width="924" height="604" rx="6"/>
+  <path fill="#3a4050" d="M8,14 a6,6 0 0 1 6,-6 h912 a6,6 0 0 1 6,6 v24 h-924 z"/>
+  <text class="t" x="26" y="30" font-size="12.5" font-weight="700" fill="#dfe6ef">EdgeSight · 单目视觉感知栈</text>
+  <g fill="#5c6879">
+    <circle cx="888" cy="26" r="4"/><circle cx="903" cy="26" r="4"/><circle cx="918" cy="26" r="4"/>
+  </g>
+
+  <!-- 页签 -->
+  <g class="t tbt">
+    <text x="34" y="63">监视</text>
+    <text x="326" y="63">设置</text>
+    <text x="396" y="63">录制回放</text>
+    <text x="506" y="63">标定</text>
+  </g>
+  <rect x="90" y="46" width="104" height="26" rx="4" fill="#ffffff" stroke="#a9b6c6"/>
+  <text class="t tba" x="142" y="63" text-anchor="middle">深度分析</text>
+  <line x1="20" y1="72" x2="920" y2="72" stroke="#c3cdd9" stroke-width="1"/>
+
+  <!-- TTC 分析 -->
+  <rect class="grp" x="20" y="82" width="364" height="268" rx="4"/>
+  <rect x="30" y="74" width="64" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="86">TTC分析</text>
+  <g transform="translate(32,100)">
+    <rect class="pl" width="340" height="190"/>
+    <g class="gd"><line x1="0" y1="38" x2="340" y2="38"/><line x1="0" y1="76" x2="340" y2="76"/>
+      <line x1="0" y1="114" x2="340" y2="114"/><line x1="0" y1="152" x2="340" y2="152"/></g>
+    <g class="t ax"><text x="6" y="24">6 s</text><text x="6" y="74">4 s</text><text x="6" y="124">2 s</text></g>
+    <text class="t ax" x="316" y="182">时间 →</text>
+    <line x1="0" y1="140" x2="340" y2="140" stroke="#c07a2a" stroke-width="1" stroke-dasharray="5 4"/>
+    <text class="t ax" x="248" y="136" fill="#a06a24">危险线 1.2 s</text>
+    <polyline fill="none" stroke="#c07a2a" stroke-width="2"
+      points="0,28 40,32 80,44 120,62 160,86 200,112 240,130 280,142 320,148 340,150"/>
+  </g>
+  <text class="t lbl" x="32" y="306">提示：</text>
+  <text class="t val" x="76" y="306">目标接近中：TTC 0.8 s（≤1.2 s 判危险）</text>
+
+  <!-- 目标距离分析 -->
+  <rect class="grp" x="392" y="82" width="528" height="268" rx="4"/>
+  <rect x="402" y="74" width="100" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="406" y="86">目标距离分析</text>
+  <g transform="translate(404,100)">
+    <rect class="pl" width="504" height="190"/>
+    <g class="gd"><line x1="0" y1="38" x2="504" y2="38"/><line x1="0" y1="76" x2="504" y2="76"/>
+      <line x1="0" y1="114" x2="504" y2="114"/><line x1="0" y1="152" x2="504" y2="152"/></g>
+    <g class="t ax"><text x="6" y="24">6 m</text><text x="6" y="74">4 m</text><text x="6" y="124">2 m</text></g>
+    <text class="t ax" x="480" y="182">时间 →</text>
+    <polyline fill="none" stroke="#3f7fbf" stroke-width="2"
+      points="0,120 72,95 144,70 216,45 288,70 360,95 432,120 504,120"/>
+  </g>
+  <text class="t lbl" x="404" y="306">提示：</text>
+  <text class="t val" x="448" y="306">接触点法 4.03 m ｜ 框跨度法 4.02 m，差 0.2%（≤15% 互检门槛）</text>
+
+  <!-- 置信度分析 -->
+  <rect class="grp" x="20" y="360" width="364" height="252" rx="4"/>
+  <rect x="30" y="352" width="76" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="364">置信度分析</text>
+  <g transform="translate(32,378)">
+    <rect class="pl" width="340" height="170"/>
+    <g class="gd"><line x1="0" y1="34" x2="340" y2="34"/><line x1="0" y1="68" x2="340" y2="68"/>
+      <line x1="0" y1="102" x2="340" y2="102"/><line x1="0" y1="136" x2="340" y2="136"/></g>
+    <g class="t ax"><text x="6" y="24">1.0</text><text x="6" y="99">0.8</text><text x="6" y="166">0.6</text></g>
+    <text class="t ax" x="314" y="162">时间 →</text>
+    <polyline fill="none" stroke="#4a9160" stroke-width="2"
+      points="0,46 34,39 68,65 102,54 136,42 170,72 204,50 238,61 272,35 306,57 340,46"/>
+  </g>
+  <text class="t lbl" x="32" y="574">提示：</text>
+  <text class="t val" x="76" y="574">近 30 帧检测置信度均值 0.93</text>
+
+  <!-- 系统性能分析 -->
+  <rect class="grp" x="392" y="360" width="528" height="252" rx="4"/>
+  <rect x="402" y="352" width="100" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="406" y="364">系统性能分析</text>
+  <g transform="translate(404,378)">
+    <rect class="pl" width="302" height="222"/>
+    <g class="gd"><line x1="0" y1="44" x2="302" y2="44"/><line x1="0" y1="88" x2="302" y2="88"/>
+      <line x1="0" y1="132" x2="302" y2="132"/><line x1="0" y1="176" x2="302" y2="176"/></g>
+    <g class="t ax"><text x="6" y="26">25</text><text x="6" y="66">20</text><text x="6" y="106">15</text></g>
+    <text class="t ax" x="276" y="214">FPS · 时间 →</text>
+    <polyline fill="none" stroke="#6b5bd2" stroke-width="2"
+      points="0,62 28,66 56,59 84,56 112,68 140,54 168,64 196,67 224,57 252,70 280,60 302,63"/>
+  </g>
+  <text class="t lbl" x="716" y="424">CPU占用：</text>
+  <rect x="716" y="434" width="192" height="14" rx="4" fill="#dbe3ec"/>
+  <rect x="716" y="434" width="119" height="14" rx="4" fill="#3f7fbf"/>
+  <text class="t val" x="716" y="468">62%</text>
+  <text class="t lbl" x="716" y="500">内存占用：</text>
+  <rect x="716" y="510" width="192" height="14" rx="4" fill="#dbe3ec"/>
+  <rect x="716" y="510" width="92" height="14" rx="4" fill="#3f7fbf"/>
+  <text class="t val" x="716" y="544">48%</text>
+
+  <text class="t sm" x="20" y="632">示意图：分组标题与控件文案取自 ui/EdgeSightMain.ui；曲线为示意波形。</text>
+  <text class="t sm" x="20" y="650">距离曲线形状对应实测录像的平台段序列（2→5→2 m）；其余读数与 CPU / 内存百分比为示例值。</text>
+</svg>

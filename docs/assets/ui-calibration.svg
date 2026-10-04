@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 1040" width="940" height="1040" role="img"
+     aria-label="EdgeSight 标定页界面示意图：画面区、棋盘标定、采样点标定、指纹建档">
+  <defs>
+    <style>
+      .t   { font-family: "Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC",sans-serif; }
+      .win { fill:#f4f7fa; stroke:#8d9bad; stroke-width:1.2; }
+      .tbt { font-size:12.5px; fill:#9aa7b8; }
+      .tba { font-size:12.5px; font-weight:700; fill:#1f2d3d; }
+      .grp { fill:#fbfcfe; stroke:#a9b6c6; stroke-width:1.1; }
+      .gt  { font-size:12px; font-weight:700; fill:#2b3a4d; }
+      .lbl { font-size:11.5px; fill:#5a6a7d; }
+      .val { font-size:12px; font-weight:700; fill:#1f2d3d; }
+      .btn { font-size:11.5px; fill:#2b3a4d; }
+      .big { font-size:26px; font-weight:700; fill:#2f7d4f; }
+      .mid { font-size:11pt; font-weight:700; fill:#2b3a4d; }
+      .sm  { font-size:10.5px; fill:#7b8898; }
+      .hint{ font-size:10px; fill:#7b8898; }
+      .box { fill:#ffffff; stroke:#b6c2d0; stroke-width:1; }
+      .dis { fill:#eef1f5; stroke:#c3cdd9; stroke-width:1; }
+      .dist{ font-size:11.5px; fill:#a3aebd; }
+      .scr { fill:#e6ebf2; }
+      .hnd { fill:#4a5568; }
+    </style>
+  </defs>
+
+  <rect width="940" height="1040" fill="#ffffff"/>
+
+  <rect class="win" x="8" y="8" width="924" height="984" rx="6"/>
+  <path fill="#3a4050" d="M8,14 a6,6 0 0 1 6,-6 h912 a6,6 0 0 1 6,6 v24 h-924 z"/>
+  <text class="t" x="26" y="30" font-size="12.5" font-weight="700" fill="#dfe6ef">EdgeSight · 单目视觉感知栈</text>
+  <g fill="#5c6879">
+    <circle cx="888" cy="26" r="4"/><circle cx="903" cy="26" r="4"/><circle cx="918" cy="26" r="4"/>
+  </g>
+
+  <g class="t tbt">
+    <text x="34" y="63">监视</text>
+    <text x="142" y="63">深度分析</text>
+    <text x="232" y="63">设置</text>
+    <text x="322" y="63">录制回放</text>
+  </g>
+  <rect x="380" y="46" width="64" height="26" rx="4" fill="#ffffff" stroke="#a9b6c6"/>
+  <text class="t tba" x="412" y="63" text-anchor="middle">标定</text>
+  <line x1="20" y1="72" x2="920" y2="72" stroke="#c3cdd9" stroke-width="1"/>
+
+  <!-- 顶部提示 -->
+  <text class="t hint" x="20" y="88">标定与登记共三件，互不依赖、按需做：① 棋盘标定（内参与本机设备绑定）→ ② 采样点标定（安装高度 / 俯角）→ ③ 指纹建档（记住这个人）。</text>
+  <text class="t hint" x="20" y="106">前两件随设备做一次，第三件每换一个人做一次。三件都要看着下面的画面操作。</text>
+
+  <!-- 画面（带检测框与测距） -->
+  <rect class="grp" x="20" y="122" width="900" height="292" rx="4"/>
+  <rect x="30" y="114" width="164" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="126">画面（带检测框与测距）</text>
+  <g transform="translate(32,150)">
+    <rect width="480" height="218" fill="#eef2f6" stroke="#c3cdd9" stroke-width="1"/>
+    <rect width="480" height="86" fill="#e7ecf2"/>
+    <rect y="86" width="480" height="132" fill="#dde4ec"/>
+    <line x1="0" y1="86" x2="480" y2="86" stroke="#b9c4d0" stroke-width="1"/>
+    <line x1="240" y1="86" x2="16" y2="218" stroke="#c3cdd9" stroke-width="1"/>
+    <line x1="240" y1="86" x2="464" y2="218" stroke="#c3cdd9" stroke-width="1"/>
+    <g stroke="#c9d3de" stroke-width="1">
+      <line x1="0" y1="180" x2="480" y2="180"/><line x1="0" y1="145" x2="480" y2="145"/>
+      <line x1="0" y1="122" x2="480" y2="122"/><line x1="0" y1="107" x2="480" y2="107"/>
+    </g>
+    <g class="t" font-size="9" fill="#8b97a5">
+      <text x="452" y="177">2 m</text><text x="452" y="142">3 m</text>
+      <text x="452" y="119">4 m</text><text x="452" y="104">5 m</text>
+    </g>
+    <g fill="#46536b">
+      <circle cx="240" cy="48" r="8"/>
+      <path d="M224,57 q16,-7 32,0 l4,34 -8,0 -1,30 -7,0 -1,-30 -7,0 -1,30 -7,0 -1,-30 -7,0 z"/>
+    </g>
+    <rect x="218" y="40" width="44" height="82" fill="none" stroke="#4a9160" stroke-width="2.4"/>
+    <rect x="218" y="22" width="74" height="17" rx="2" fill="#4a9160"/>
+    <text class="t" x="255" y="34" font-size="10.5" fill="#ffffff" text-anchor="middle">person 0.94</text>
+    <g stroke="#c07a2a" stroke-width="1.6">
+      <line x1="232" y1="122" x2="248" y2="122"/><line x1="240" y1="114" x2="240" y2="130"/>
+    </g>
+    <rect x="209" y="136" width="62" height="19" rx="3" fill="#fdf1e3" stroke="#c07a2a"/>
+    <text class="t" x="240" y="149" font-size="11.5" font-weight="700" fill="#8a4f12" text-anchor="middle">4.02 m</text>
+    <text class="t" x="8" y="210" font-size="9.5" fill="#8b97a5">示意图 · 合成画面</text>
+  </g>
+  <text class="t mid" x="725" y="212" text-anchor="middle">目标距离</text>
+  <text class="t big" x="725" y="282" text-anchor="middle">4.02 m</text>
+  <text class="t hint" x="725" y="318" text-anchor="middle">做 ① 时此处显示棋盘格采集画面</text>
+
+  <!-- ① 棋盘标定 -->
+  <rect class="grp" x="20" y="422" width="900" height="310" rx="4"/>
+  <rect x="30" y="414" width="140" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="426">① 棋盘标定（内参）</text>
+  <g class="t">
+    <text class="lbl" x="34" y="452">本机摄像头：</text>
+    <rect class="box" x="128" y="438" width="240" height="20" rx="4"/>
+    <text class="btn" x="138" y="452">内置摄像头</text>
+    <path d="M354,446 l6,6 l6,-6" fill="none" stroke="#5a6a7d" stroke-width="1.4"/>
+    <text class="val" x="392" y="452">已识别（1 台）</text>
+
+    <text class="hint" x="34" y="480">正在识别摄像头…… → 已确认；内参按设备指纹分档记忆，换相机不会混用别人的内参。</text>
+
+    <rect class="box" x="34" y="492" width="220" height="24" rx="4"/>
+    <text class="btn" x="144" y="508" text-anchor="middle">把当前标定绑定到本设备</text>
+    <rect class="box" x="266" y="492" width="120" height="24" rx="4"/>
+    <text class="btn" x="326" y="508" text-anchor="middle">重新检测设备</text>
+
+    <text class="lbl" x="34" y="540">棋盘格内角点：</text>
+    <rect class="box" x="146" y="526" width="56" height="20" rx="4"/>
+    <text class="val" x="174" y="540" text-anchor="middle">9</text>
+    <text class="lbl" x="212" y="540">×</text>
+    <rect class="box" x="228" y="526" width="56" height="20" rx="4"/>
+    <text class="val" x="256" y="540" text-anchor="middle">6</text>
+
+    <text class="lbl" x="34" y="572">方格边长（mm）：</text>
+    <rect class="box" x="146" y="558" width="80" height="20" rx="4"/>
+    <text class="val" x="186" y="572" text-anchor="middle">17.1</text>
+    <text class="hint" x="240" y="572">以打印后实测为准：量图上那条 100 mm 校验尺换算，填错全部距离等比错。</text>
+
+    <text class="lbl" x="34" y="604">相机俯仰角（°）：</text>
+    <rect class="box" x="146" y="590" width="80" height="20" rx="4"/>
+    <text class="val" x="186" y="604" text-anchor="middle">0.0</text>
+
+    <text class="lbl" x="34" y="636">相机安装高度（m）：</text>
+    <rect class="box" x="170" y="622" width="80" height="20" rx="4"/>
+    <text class="val" x="210" y="636" text-anchor="middle">0.00</text>
+    <text class="hint" x="266" y="636">这两格一般不手填 —— 由 ② 采样点标定反解后回填，不需要量角器、也不需要量相机装多高。</text>
+
+    <rect class="box" x="34" y="656" width="112" height="24" rx="4"/>
+    <text class="btn" x="90" y="672" text-anchor="middle">开始采集</text>
+    <rect class="box" x="158" y="656" width="112" height="24" rx="4"/>
+    <text class="btn" x="214" y="672" text-anchor="middle">求解并保存</text>
+
+    <text class="hint" x="34" y="702">已采集 14 帧；让棋盘格在画面中变换位置与倾斜角，采够 10 帧后点「求解并保存」求内参与畸变系数。</text>
+  </g>
+
+  <!-- ② 采样点标定 -->
+  <rect class="grp" x="20" y="740" width="900" height="110" rx="4"/>
+  <rect x="30" y="732" width="184" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="744">② 采样点标定（安装参数）</text>
+  <text class="t hint" x="34" y="768">让目标站到卷尺量好的已知距离处、静止，点「记为采样点」。推荐 2 m / 5 m / 10 m 三点（两点无法自查错误标记），然后点「求解安装参数」。</text>
+  <g class="t">
+    <text class="lbl" x="34" y="800">已知距离（m）：</text>
+    <rect class="box" x="146" y="786" width="80" height="20" rx="4"/>
+    <text class="val" x="186" y="800" text-anchor="middle">2.00</text>
+    <rect class="box" x="240" y="784" width="120" height="24" rx="4"/>
+    <text class="btn" x="300" y="800" text-anchor="middle">记为采样点</text>
+    <rect class="dis" x="374" y="784" width="132" height="24" rx="4"/>
+    <text class="dist" x="440" y="800" text-anchor="middle">求解安装参数</text>
+    <text class="hint" x="34" y="830">已记录 2 点：2.00 m、3.00 m —— 两点恒能严格拟合，再记 1 点才能自查标记错误。</text>
+  </g>
+
+  <!-- ③ 指纹建档 -->
+  <rect class="grp" x="20" y="856" width="900" height="132" rx="4"/>
+  <rect x="30" y="848" width="212" height="16" fill="#fbfcfe"/>
+  <text class="t gt" x="34" y="860">③ 指纹建档（让程序记住这个人）</text>
+  <text class="t hint" x="34" y="880">让被登记者走到画面中间（3–10 m），点「开始建档」后站定约 3 秒，攒够稳定窗口即自动记入档案。可连续给多人建档。</text>
+  <text class="t hint" x="34" y="898">下面「画面」组会实时显示反解出的框跨度（纵 / 横）；数值越过合理区间会直接判失败并说明原因，不会把可疑值静默写进档案。</text>
+  <g class="t">
+    <text class="lbl" x="34" y="926">采样点距离（m）：</text>
+    <rect class="box" x="158" y="912" width="80" height="20" rx="4"/>
+    <text class="val" x="198" y="926" text-anchor="middle">0.00</text>
+    <text class="hint" x="252" y="926">留 0 = 用测距值反解框跨度（需先完成 ①②）；填大于 0 = 用手填距离绕过标定。</text>
+    <rect class="box" x="726" y="910" width="120" height="24" rx="4"/>
+    <text class="btn" x="786" y="926" text-anchor="middle">开始建档</text>
+    <text class="t" x="34" y="960" font-size="20" font-weight="700" fill="#2b3a4d">未开始</text>
+    <text class="hint" x="34" y="978">匹配：本帧未计算</text>
+  </g>
+
+  <rect class="scr" x="906" y="422" width="14" height="560" rx="7"/>
+  <rect class="hnd" x="909" y="440" width="8" height="230" rx="4"/>
+
+  <text class="t sm" x="20" y="1012">示意图：页签名、分组标题、控件文案与提示原文均取自 ui/EdgeSightMain.ui。画面区是合成场景（人物以剪影表示），非真实拍摄；</text>
+  <text class="t sm" x="20" y="1030">不呈现任何真实个体或环境。俯仰角 / 安装高度两格为 .ui 默认值（实际由 ② 反解回填）；读数 4.02 m 取自卷尺 4 m 点的实测中位数。</text>
+</svg>
