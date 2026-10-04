@@ -42,7 +42,7 @@
 ## 快速开始
 
 ```bash
-git clone https://github.com/embed-lsy/EdgeSight.git
+git clone https://github.com/fdagtfedshe/EdgeSight.git
 cd EdgeSight
 
 # Windows

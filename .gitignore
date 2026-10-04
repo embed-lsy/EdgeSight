@@ -25,7 +25,6 @@ Thumbs.db
 recordings/
 *.mp4
 *.avi
-!test/**/*.mp4
 
 # 标定产物（设备相关，换相机需重标，不入库）
 models/calib.json
@@ -37,3 +36,6 @@ models/mount.json
 models/settings.json
 # 人特征档案（身高/肩宽/外观，跟具体的人和场景相关，不入库）
 models/person_profile.json
+
+# 工作区私有目录（工具/笔记/缓存，不属于项目代码）
+.workbuddy/
