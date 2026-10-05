@@ -9,6 +9,10 @@
 ![Python](https://img.shields.io/badge/Python-3.13-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Raspberry%20Pi-blue.svg)
 
+下面这段视频用 **4 分 49 秒**讲清 EdgeSight 是做什么的、单张图怎么算出米制距离、三次标定怎么工作、TTC 预警怎么算，以及实测误差和识别率。点击封面即可观看。
+
+[![项目讲解视频封面](docs/assets/intro-cover.png)](docs/media/edgesight-intro.mp4)
+
 > **当前状态**：开发重心在 Windows 端；树莓派端（`main_raspberry.py`）代码冻结、待移植。
 
 ---

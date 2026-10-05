@@ -25,6 +25,8 @@ Thumbs.db
 recordings/
 *.mp4
 *.avi
+# 例外：README 项目讲解视频
+!docs/media/edgesight-intro.mp4
 
 # 标定产物（设备相关，换相机需重标，不入库）
 models/calib.json
